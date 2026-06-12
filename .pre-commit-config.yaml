@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        exclude: ^src/veilrender/_vendor/
+      - id: ruff-format
+        exclude: ^src/veilrender/_vendor/
+
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty check
+        description: Type check src/ with ty.
+        entry: ty check src/
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [python]

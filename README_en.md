@@ -1,0 +1,88 @@
+# VeilRender
+
+[中文](README_zh.md) | **English**
+
+Headless browser rendering API — self-hostable on HF Spaces, Docker, or bare metal.
+
+VeilRender accepts a URL and returns the fully rendered page content (HTML, Markdown, readability-extracted article) using a headless Chromium browser. Designed as a fallback for fetch tools that fail on JavaScript-rendered pages.
+
+## Quick Start
+
+### Docker
+
+```bash
+docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret ghcr.io/oaklight/veilrender
+```
+
+### Local Development
+
+```bash
+pip install -e ".[dev]"
+playwright install chromium
+python -m veilrender
+```
+
+## API
+
+### GET /health
+
+Returns `{"status": "ok"}` if the service is running.
+
+### POST /render
+
+Render a URL and return the page content.
+
+```bash
+curl -X POST http://localhost:7860/render \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
+
+Response:
+
+```json
+{
+  "content": {
+    "html": "...",
+    "markdown": "...",
+    "readability": "..."
+  },
+  "metadata": {
+    "title": "Example Domain",
+    "url": "https://example.com",
+    "status_code": 200
+  },
+  "links": [{"url": "https://www.iana.org/domains/example", "text": "More information..."}]
+}
+```
+
+### POST /screenshot
+
+Capture a screenshot of a URL.
+
+```bash
+curl -X POST http://localhost:7860/screenshot \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}' \
+  -o screenshot.png
+```
+
+## Configuration
+
+All settings are configured via environment variables with the `VEILRENDER_` prefix:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VEILRENDER_API_TOKEN` | *(none)* | API token for authentication. If unset, auth is disabled. |
+| `VEILRENDER_PORT` | `7860` | Server port |
+| `VEILRENDER_HOST` | `0.0.0.0` | Server bind address |
+| `VEILRENDER_TIMEOUT` | `30000` | Browser navigation timeout (ms) |
+| `VEILRENDER_VIEWPORT_WIDTH` | `1280` | Browser viewport width |
+| `VEILRENDER_VIEWPORT_HEIGHT` | `720` | Browser viewport height |
+| `VEILRENDER_MAX_CONCURRENT` | `3` | Max concurrent browser contexts |
+
+## License
+
+MIT
