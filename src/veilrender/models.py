@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
+
+WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 
 
 @dataclass
@@ -14,7 +16,7 @@ class RenderRequest:
     formats: list[str] = field(
         default_factory=lambda: ["html", "markdown", "readability"]
     )
-    wait_until: str = "networkidle"
+    wait_until: WaitUntil = "networkidle"
     timeout: int | None = None  # ms, None = use default
 
     @classmethod
@@ -34,7 +36,7 @@ class ScreenshotRequest:
 
     url: str
     full_page: bool = False
-    wait_until: str = "networkidle"
+    wait_until: WaitUntil = "networkidle"
     timeout: int | None = None
     viewport_width: int | None = None
     viewport_height: int | None = None
