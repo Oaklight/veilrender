@@ -20,6 +20,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _pipe(source: asyncio.StreamReader, dest: asyncio.StreamReader) -> None:
+    """Relay remaining data from *source* into *dest* until EOF."""
+    try:
+        while True:
+            chunk = await source.read(8192)
+            if not chunk:
+                break
+            dest.feed_data(chunk)
+    except Exception:
+        pass
+    finally:
+        dest.feed_eof()
+
+
 def create_app() -> App:
     """Create and configure the VeilRender application."""
     app = App(max_body_size=10 * 1024 * 1024)  # 10 MB
@@ -92,13 +106,17 @@ def main() -> None:
                     )
                     return
 
-                # Otherwise, delegate to httpserver
-                # Re-feed the already-read data by creating a new reader
+                # Otherwise, delegate to httpserver.
+                # Re-feed the buffered bytes and pipe any remaining body
+                # data from the original reader so POST bodies are not
+                # truncated (see #5).
                 combined_reader = asyncio.StreamReader()
                 combined_reader.feed_data(raw)
-                combined_reader.feed_eof()
-
-                await app._handle_connection(combined_reader, writer)
+                pipe_task = asyncio.create_task(_pipe(reader, combined_reader))
+                try:
+                    await app._handle_connection(combined_reader, writer)
+                finally:
+                    pipe_task.cancel()
             except Exception:
                 logger.debug("Connection handler error", exc_info=True)
                 try:
