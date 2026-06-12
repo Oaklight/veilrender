@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veilrender"
+dynamic = ["version"]
+description = "Headless browser rendering API — self-hostable on HF Spaces, Docker, or bare metal"
+authors = [{ name = "Peng Ding" }]
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+classifiers = [
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP",
+]
+
+dependencies = [
+    "playwright>=1.50.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.11.0",
+    "ty>=0.0.1a0",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.scripts]
+veilrender = "veilrender.app:main"
+
+[project.urls]
+Repository = "https://github.com/Oaklight/veilrender"
+Issues = "https://github.com/Oaklight/veilrender/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "veilrender.__version__" }
+
+[tool.setuptools.package-data]
+"veilrender" = ["py.typed"]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "UP"]
+ignore = ["UP007", "E501"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.src]
+exclude = ["src/veilrender/_vendor/**"]
+
+[tool.ty.rules]
+unresolved-import = "ignore"
