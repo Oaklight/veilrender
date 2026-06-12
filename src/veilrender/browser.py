@@ -28,7 +28,7 @@ class BrowserManager:
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        """Launch the shared browser instance."""
+        """Launch the shared browser instance with CDP enabled."""
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=True,
@@ -37,9 +37,16 @@ class BrowserManager:
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--remote-debugging-port=9222",
             ],
         )
-        logger.info("Browser started (pid=%s)", self._browser.contexts)
+        logger.info("Browser started")
+
+    async def get_cdp_url(self) -> str | None:
+        """Return the internal CDP WebSocket URL, or None if unavailable."""
+        await self._ensure_browser()
+        # The browser was launched with --remote-debugging-port=9222
+        return "ws://127.0.0.1:9222"
 
     async def stop(self) -> None:
         """Close the browser and Playwright."""
