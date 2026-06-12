@@ -10,6 +10,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import struct
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -85,8 +86,6 @@ def _make_ws_frame(
         frame.extend(struct.pack("!Q", length))
 
     if mask:
-        import os
-
         mask_key = os.urandom(4)
         frame.extend(mask_key)
         masked = bytearray(payload)
@@ -213,7 +212,8 @@ async def handle_cdp_upgrade(
         return
 
     # WebSocket handshake with internal CDP
-    cdp_ws_key = base64.b64encode(b"veilrender-cdp-key!").decode()
+    cdp_ws_key = base64.b64encode(os.urandom(16)).decode()
+    ws_protocol = headers.get("sec-websocket-protocol", "")
     handshake = (
         f"GET {cdp_path} HTTP/1.1\r\n"
         f"Host: {cdp_host}:{cdp_port}\r\n"
@@ -221,8 +221,10 @@ async def handle_cdp_upgrade(
         f"Connection: Upgrade\r\n"
         f"Sec-WebSocket-Version: 13\r\n"
         f"Sec-WebSocket-Key: {cdp_ws_key}\r\n"
-        f"\r\n"
     )
+    if ws_protocol:
+        handshake += f"Sec-WebSocket-Protocol: {ws_protocol}\r\n"
+    handshake += "\r\n"
     cdp_writer.write(handshake.encode())
     await cdp_writer.drain()
 
@@ -254,8 +256,10 @@ async def handle_cdp_upgrade(
         f"Upgrade: websocket\r\n"
         f"Connection: Upgrade\r\n"
         f"Sec-WebSocket-Accept: {accept}\r\n"
-        f"\r\n"
     )
+    if ws_protocol:
+        response += f"Sec-WebSocket-Protocol: {ws_protocol}\r\n"
+    response += "\r\n"
     writer.write(response.encode())
     await writer.drain()
 
