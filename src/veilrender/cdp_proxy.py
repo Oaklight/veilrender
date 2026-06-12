@@ -260,23 +260,26 @@ async def handle_cdp_upgrade(
 
     # Bidirectional proxy
     try:
-        await asyncio.gather(
-            _proxy_ws(
-                reader,
-                cdp_writer,
-                src_masked=True,
-                dst_mask=True,
-                label="client→cdp",
-            ),
-            _proxy_ws(
-                cdp_reader,
-                writer,
-                src_masked=False,
-                dst_mask=False,
-                label="cdp→client",
-            ),
-        )
-    except Exception as exc:
+        async with asyncio.TaskGroup() as tg:
+            tg.create_task(
+                _proxy_ws(
+                    reader,
+                    cdp_writer,
+                    src_masked=True,
+                    dst_mask=True,
+                    label="client→cdp",
+                )
+            )
+            tg.create_task(
+                _proxy_ws(
+                    cdp_reader,
+                    writer,
+                    src_masked=False,
+                    dst_mask=False,
+                    label="cdp→client",
+                )
+            )
+    except* Exception as exc:
         logger.debug("CDP proxy ended: %s", exc)
     finally:
         logger.info("CDP proxy session ended")
