@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
+from cloakbrowser import ensure_binary, get_default_stealth_args
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from veilrender.config import settings
@@ -29,18 +30,21 @@ class BrowserManager:
 
     async def start(self) -> None:
         """Launch the shared browser instance with CDP enabled."""
+        executable_path = ensure_binary()
+        stealth_args = get_default_stealth_args()
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
+            executable_path=executable_path,
             headless=True,
             args=[
-                "--no-sandbox",
+                *stealth_args,
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
                 "--remote-debugging-port=9222",
             ],
         )
-        logger.info("Browser started")
+        logger.info("Browser started (CloakBrowser %s)", executable_path)
 
     async def get_cdp_url(self) -> str | None:
         """Return the internal CDP WebSocket URL, or None if unavailable."""
