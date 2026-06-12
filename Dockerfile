@@ -34,8 +34,11 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
 
-# Pre-download CloakBrowser Chromium binary so the image is self-contained
-RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
+# Pre-download CloakBrowser Chromium binary to a shared location so both
+# root (build) and user 1000 (runtime) can find it.
+ENV CLOAKBROWSER_CACHE_DIR=/opt/cloakbrowser
+RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()" \
+    && chmod -R a+rX /opt/cloakbrowser
 
 USER 1000
 EXPOSE 7860
