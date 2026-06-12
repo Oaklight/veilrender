@@ -37,13 +37,14 @@ def _accept_key(key: str) -> str:
 
 async def _read_ws_frame(
     reader: asyncio.StreamReader,
-) -> tuple[int, bytes] | None:
-    """Read one WebSocket frame. Returns (opcode, payload) or None on EOF."""
+) -> tuple[bool, int, bytes] | None:
+    """Read one WebSocket frame. Returns (fin, opcode, payload) or None on EOF."""
     try:
         head = await reader.readexactly(2)
     except (asyncio.IncompleteReadError, ConnectionError):
         return None
 
+    fin = bool(head[0] & 0x80)
     opcode = head[0] & 0x0F
     masked = bool(head[1] & 0x80)
     length = head[1] & 0x7F
@@ -60,16 +61,18 @@ async def _read_ws_frame(
         data = bytearray(await reader.readexactly(length))
         for i in range(length):
             data[i] ^= mask[i % 4]
-        return opcode, bytes(data)
+        return fin, opcode, bytes(data)
     else:
         data = await reader.readexactly(length)
-        return opcode, data
+        return fin, opcode, data
 
 
-def _make_ws_frame(opcode: int, payload: bytes, mask: bool = False) -> bytes:
+def _make_ws_frame(
+    opcode: int, payload: bytes, *, fin: bool = True, mask: bool = False
+) -> bytes:
     """Build a WebSocket frame."""
     frame = bytearray()
-    frame.append(0x80 | opcode)  # FIN + opcode
+    frame.append((0x80 if fin else 0x00) | opcode)
 
     length = len(payload)
     if length < 126:
@@ -110,20 +113,20 @@ async def _proxy_ws(
         if result is None:
             break
 
-        opcode, payload = result
+        fin, opcode, payload = result
 
         if opcode == _OP_CLOSE:
-            frame = _make_ws_frame(_OP_CLOSE, payload, mask=dst_mask)
+            frame = _make_ws_frame(_OP_CLOSE, payload, fin=True, mask=dst_mask)
             dst_writer.write(frame)
             await dst_writer.drain()
             break
         elif opcode == _OP_PING:
             # Forward pings as-is to the other side
-            frame = _make_ws_frame(_OP_PING, payload, mask=dst_mask)
+            frame = _make_ws_frame(_OP_PING, payload, fin=True, mask=dst_mask)
             dst_writer.write(frame)
             await dst_writer.drain()
         else:
-            frame = _make_ws_frame(opcode, payload, mask=dst_mask)
+            frame = _make_ws_frame(opcode, payload, fin=fin, mask=dst_mask)
             dst_writer.write(frame)
             await dst_writer.drain()
 
