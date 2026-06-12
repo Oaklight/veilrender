@@ -29,6 +29,11 @@ _OP_PONG = 0xA
 
 _WS_MAGIC = b"258EAFA5-E914-47DA-95CA-5B0D11CF9245"
 
+# Maximum allowed WebSocket frame payload size (16 MB).
+# Frames exceeding this limit are rejected to prevent OOM from
+# malicious headers claiming excessively large payloads.
+MAX_FRAME_SIZE = 16 * 1024 * 1024
+
 
 def _accept_key(key: str) -> str:
     """Compute Sec-WebSocket-Accept from Sec-WebSocket-Key."""
@@ -56,6 +61,10 @@ async def _read_ws_frame(
     elif length == 127:
         raw = await reader.readexactly(8)
         length = struct.unpack("!Q", raw)[0]
+
+    if length > MAX_FRAME_SIZE:
+        logger.warning("WebSocket frame too large (%d bytes), dropping", length)
+        return None
 
     if masked:
         mask = await reader.readexactly(4)
