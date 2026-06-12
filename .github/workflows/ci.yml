@@ -98,7 +98,7 @@ jobs:
 
           Headless browser rendering API. See [GitHub repo](https://github.com/Oaklight/veilrender) for full documentation.
           FRONTMATTER
-
+          sed -i 's/^          //' README.md
           rm -rf .github .pre-commit-config.yaml CLAUDE.md README_en.md README_zh.md Makefile
 
       - name: Push to HF Space
