@@ -34,10 +34,9 @@ COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
 
-# Pre-download CloakBrowser Chromium binary so the image is self-contained
-RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
-
+# Pre-download CloakBrowser Chromium binary as runtime user
 USER 1000
+RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
 EXPOSE 7860
 
 CMD ["python", "-m", "veilrender"]
