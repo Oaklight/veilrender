@@ -11,7 +11,3 @@ def register(app: App) -> None:
     @app.get("/health")
     async def health(request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok"})
-
-    @app.get("/")
-    async def root(request: Request) -> JSONResponse:
-        return JSONResponse({"service": "veilrender", "status": "ok"})

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from veilrender._vendor.httpserver import App, JSONResponse, Request
 from veilrender._vendor.readability import extract as readability_extract
 from veilrender._vendor.soup import Soup
+from veilrender import stats
 from veilrender.auth import verify_token
 from veilrender.browser import browser_manager
 from veilrender.config import settings
@@ -70,6 +72,8 @@ def register(app: App) -> None:
 
         req = RenderRequest.from_dict(data)
         timeout = req.timeout or settings.timeout
+        stats.render.requests += 1
+        t0 = time.monotonic()
 
         try:
             async with browser_manager.get_page() as (ctx, page):
@@ -83,6 +87,8 @@ def register(app: App) -> None:
                 final_url = page.url
                 html = await page.content()
         except Exception as exc:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.render.record_failure(elapsed)
             logger.error("Render failed for %s: %s", req.url, exc)
             return JSONResponse(
                 {"error": f"Render failed: {exc!s}"},
@@ -119,4 +125,6 @@ def register(app: App) -> None:
             links=links,
         )
 
+        elapsed = (time.monotonic() - t0) * 1000
+        stats.render.record_success(elapsed)
         return JSONResponse(result.to_dict())

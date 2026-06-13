@@ -139,6 +139,16 @@ class BrowserManager:
             assert self._browser is not None
             return self._browser
 
+    @property
+    def active_pages(self) -> int:
+        """Number of browser pages currently in use."""
+        return settings.max_concurrent - self._semaphore._value
+
+    @property
+    def is_browser_alive(self) -> bool:
+        """Whether the browser process is connected."""
+        return self._browser is not None and self._browser.is_connected()
+
     @asynccontextmanager
     async def get_page(
         self,
