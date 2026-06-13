@@ -3,8 +3,8 @@
 [![PyPI version](https://img.shields.io/pypi/v/veilrender?color=green)](https://pypi.org/project/veilrender/)
 [![GitHub release](https://img.shields.io/github/v/release/Oaklight/veilrender?color=green)](https://github.com/Oaklight/veilrender/releases/latest)
 [![CI](https://github.com/Oaklight/veilrender/actions/workflows/ci.yml/badge.svg)](https://github.com/Oaklight/veilrender/actions/workflows/ci.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/oaklight/veilrender)](https://hub.docker.com/r/oaklight/veilrender)
-[![Docker Image](https://img.shields.io/docker/v/oaklight/veilrender?sort=semver&label=docker)](https://hub.docker.com/r/oaklight/veilrender)
+[![Docker Pulls](https://img.shields.io/docker/pulls/oaklight/veilrender?color=blue)](https://hub.docker.com/r/oaklight/veilrender)
+[![Docker Image](https://img.shields.io/docker/v/oaklight/veilrender?sort=semver&label=docker&color=blue)](https://hub.docker.com/r/oaklight/veilrender)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![HF Spaces](https://img.shields.io/badge/%F0%9F%A4%97-Spaces-blue)](https://huggingface.co/spaces/oaklight/veilrender)
 
