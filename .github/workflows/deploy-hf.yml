@@ -1,0 +1,69 @@
+name: Deploy HF
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+jobs:
+  deploy-hf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Prepare HF Space files
+        run: |
+          cat > README.md <<'FRONTMATTER'
+          ---
+          title: VeilRender
+          emoji: 👻
+          colorFrom: gray
+          colorTo: purple
+          sdk: docker
+          app_port: 7860
+          pinned: false
+          ---
+
+          # VeilRender
+
+          Headless browser rendering API — accepts a URL, renders with headless Chromium, returns HTML / Markdown / readability content.
+
+          无头浏览器渲染 API — 接收 URL，通过无头 Chromium 渲染，返回 HTML / Markdown / 可读性提取内容。
+
+          > **Note / 注意**: This Space is a demo instance with limited resources. For production use, self-host via Docker.
+          >
+          > 此 Space 为演示实例，资源有限。生产环境请通过 Docker 自行部署。
+
+          ## Links
+
+          - **GitHub**: [Oaklight/veilrender](https://github.com/${{ github.repository }}) — source code, docs & issues
+          - **Docker Hub**: [oaklight/veilrender](https://hub.docker.com/r/oaklight/veilrender) — pre-built multi-arch images
+          - **GHCR**: `ghcr.io/oaklight/veilrender`
+          - **PyPI**: [veilrender](https://pypi.org/project/veilrender/)
+
+          ## Quick Start
+
+          ```bash
+          docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret oaklight/veilrender
+          ```
+          FRONTMATTER
+          sed -i 's/^          //' README.md
+          rm -rf .github .pre-commit-config.yaml CLAUDE.md README_en.md README_zh.md Makefile BENCHMARK.md
+
+      - name: Push to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}  # e.g. oaklight/veilrender
+        run: |
+          if [ -z "$HF_SPACE" ]; then
+            echo "::warning::HF_SPACE variable not set, skipping HF deploy"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "deploy from GitHub $(git rev-parse --short HEAD@{1})" --allow-empty
+          git push --force "https://oauth2:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE}" HEAD:main
