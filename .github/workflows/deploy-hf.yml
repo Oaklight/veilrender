@@ -13,18 +13,8 @@ jobs:
         include:
           - space_var: HF_SPACE
             title: VeilRender
-            note: >-
-              > **Note / 注意**: This Space requires an API token. For a public demo, see
-              [veilrender-public](https://huggingface.co/spaces/oaklight/veilrender-public).
-              >
-              > 此 Space 需要 API token 认证。公开演示请访问
-              [veilrender-public](https://huggingface.co/spaces/oaklight/veilrender-public)。
           - space_var: HF_SPACE_PUBLIC
             title: VeilRender Public
-            note: >-
-              > **Note / 注意**: This is a public demo with no auth. For production use, self-host via Docker with a token.
-              >
-              > 此实例为公开演示，无需认证。生产环境请通过 Docker 自行部署并配置 API token。
     steps:
       - uses: actions/checkout@v6
         with:
@@ -34,45 +24,29 @@ jobs:
       - name: Prepare HF Space files
         env:
           SPACE_TITLE: ${{ matrix.title }}
-          SPACE_NOTE: ${{ matrix.note }}
         run: |
-          # Remove symlink and all non-essential files first
+          # Prepend HF frontmatter to README_en.md content
+          {
+            printf '%s\n' \
+              '---' \
+              "title: ${SPACE_TITLE}" \
+              'emoji: 👻' \
+              'colorFrom: gray' \
+              'colorTo: purple' \
+              'sdk: docker' \
+              'app_port: 7860' \
+              'pinned: false' \
+              '---' \
+              ''
+            cat README_en.md
+          } > README.hf.md
+
+          # Replace README symlink with the combined file
           rm -f README.md README_en.md README_zh.md
+          mv README.hf.md README.md
+
+          # Remove non-essential files
           rm -rf .github .pre-commit-config.yaml CLAUDE.md Makefile BENCHMARK.md
-
-          # Write fresh README with HF frontmatter
-          cat > README.md <<EOF
-          ---
-          title: ${SPACE_TITLE}
-          emoji: 👻
-          colorFrom: gray
-          colorTo: purple
-          sdk: docker
-          app_port: 7860
-          pinned: false
-          ---
-
-          # ${SPACE_TITLE}
-
-          Headless browser rendering API — accepts a URL, renders with headless Chromium, returns HTML / Markdown / readability content.
-
-          无头浏览器渲染 API — 接收 URL，通过无头 Chromium 渲染，返回 HTML / Markdown / 可读性提取内容。
-
-          ${SPACE_NOTE}
-
-          ## Links
-
-          - **GitHub**: [Oaklight/veilrender](https://github.com/${{ github.repository }}) — source code, docs & issues
-          - **Docker Hub**: [oaklight/veilrender](https://hub.docker.com/r/oaklight/veilrender) — pre-built multi-arch images
-          - **PyPI**: [veilrender](https://pypi.org/project/veilrender/)
-
-          ## Quick Start
-
-          \`\`\`bash
-          docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret oaklight/veilrender
-          \`\`\`
-          EOF
-          sed -i 's/^          //' README.md
 
       - name: Push to HF Space
         env:
