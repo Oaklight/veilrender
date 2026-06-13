@@ -1,4 +1,4 @@
-.PHONY: dev build run lint typecheck vendor clean deploy-dev deploy-hf help
+.PHONY: dev build run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf help
 
 REGISTRY_MIRROR ?= docker.io
 DOCKER_IMAGE := oaklight/veilrender
@@ -26,6 +26,16 @@ vendor:
 clean:
 	rm -rf build/ dist/ *.egg-info/ src/*.egg-info/
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+# ──────────────────────────────────────────────
+# Package targets
+# ──────────────────────────────────────────────
+
+build-package: clean
+	python -m build
+
+push-package:
+	twine upload dist/*
 
 # ──────────────────────────────────────────────
 # Dev Deployment
@@ -82,7 +92,7 @@ endif
 		'' \
 		'# VeilRender' \
 		'' \
-		"Headless browser rendering API. See [GitHub repo]($$(git remote get-url origin | sed 's/\.git$$//; s|git@github.com:|https://github.com/|')) for full documentation." \
+		'Headless browser rendering API. See [GitHub repo](https://github.com/Oaklight/veilrender) for full documentation.' \
 		> README.md; \
 	rm -rf .github .pre-commit-config.yaml CLAUDE.md README_en.md README_zh.md Makefile; \
 	git add -A; \
@@ -99,9 +109,11 @@ help:
 	@echo "  lint         - Run ruff check and format"
 	@echo "  typecheck    - Run ty check"
 	@echo "  vendor       - Re-vendor zerodep modules"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  deploy-dev   - Build dev image and deploy to remote VPS"
-	@echo "  deploy-hf    - Deploy to Hugging Face Spaces"
+	@echo "  clean         - Remove build artifacts"
+	@echo "  build-package - Build Python package"
+	@echo "  push-package  - Push package to PyPI"
+	@echo "  deploy-dev    - Build dev image and deploy to remote VPS"
+	@echo "  deploy-hf     - Deploy to Hugging Face Spaces"
 	@echo ""
 	@echo "Variables:"
 	@echo "  SSH_TARGET=<host>     - SSH target for deploy-dev (required)"
