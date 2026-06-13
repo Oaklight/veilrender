@@ -1,0 +1,5 @@
+# Zensical (replaces mkdocs + mkdocs-material)
+zensical
+
+# Additional dependencies
+pymdown-extensions>=10.0.0

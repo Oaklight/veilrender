@@ -1,0 +1,111 @@
+site_name: VeilRender
+site_description: Headless browser rendering API — self-hostable on HF Spaces, Docker, or bare metal
+site_author: Peng Ding
+site_url: https://veilrender.readthedocs.io/en/latest
+repo_name: Oaklight/veilrender
+repo_url: https://github.com/Oaklight/veilrender
+copyright: Copyright &copy; 2025 Peng Ding
+
+theme:
+  name: material
+  custom_dir: overrides
+  language: en
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - navigation.path
+    - navigation.tracking
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.prune
+    - header.autohide
+    - toc.follow
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.code.select
+    - content.tabs.link
+    - content.tooltips
+    - content.footnote.tooltips
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Oaklight/veilrender
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/veilrender/
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/oaklight/veilrender
+  alternate:
+    - name: English
+      link: /en/latest/
+      lang: en
+    - name: 中文
+      link: /zh-cn/latest/
+      lang: zh
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+  - API Reference:
+      - api/index.md
+      - POST /render: api/render.md
+      - POST /screenshot: api/screenshot.md
+      - GET /health: api/health.md
+      - GET / (Dashboard): api/dashboard.md
+  - Deployment:
+      - deployment/index.md
+      - Docker: deployment/docker.md
+      - HF Spaces: deployment/hf-spaces.md
+      - Bare Metal: deployment/bare-metal.md
+  - Configuration: configuration.md
+  - Benchmark: benchmark.md
+  - Changelog: changelog.md
