@@ -6,11 +6,19 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/oaklight/veilrender?color=blue)](https://hub.docker.com/r/oaklight/veilrender)
 [![Docker Image](https://img.shields.io/docker/v/oaklight/veilrender?sort=semver&label=docker&color=blue)](https://hub.docker.com/r/oaklight/veilrender)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![HF Spaces](https://img.shields.io/badge/%F0%9F%A4%97-Spaces-blue)](https://huggingface.co/spaces/oaklight/veilrender)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%A4%97-Live_Demo-blue)](https://oaklight-veilrender-public.hf.space)
 
 **中文** | [English](README_en.md)
 
 无头浏览器渲染 API——可自托管于 HF Spaces、Docker 或物理机。
+
+### 在线试用（无需认证）
+
+```bash
+curl -X POST https://oaklight-veilrender-public.hf.space/render \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
 
 VeilRender 接收一个 URL，使用无头 Chromium 浏览器渲染页面，并返回完整内容（HTML、Markdown、readability 提取的文章）。专为 JavaScript 渲染页面的 fetch 降级方案设计。
 

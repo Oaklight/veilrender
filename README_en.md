@@ -6,11 +6,19 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/oaklight/veilrender?color=blue)](https://hub.docker.com/r/oaklight/veilrender)
 [![Docker Image](https://img.shields.io/docker/v/oaklight/veilrender?sort=semver&label=docker&color=blue)](https://hub.docker.com/r/oaklight/veilrender)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![HF Spaces](https://img.shields.io/badge/%F0%9F%A4%97-Spaces-blue)](https://huggingface.co/spaces/oaklight/veilrender)
+[![Live Demo](https://img.shields.io/badge/%F0%9F%A4%97-Live_Demo-blue)](https://oaklight-veilrender-public.hf.space)
 
 [中文](README_zh.md) | **English**
 
 Headless browser rendering API — self-hostable on HF Spaces, Docker, or bare metal.
+
+### Try it now (no auth needed)
+
+```bash
+curl -X POST https://oaklight-veilrender-public.hf.space/render \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com"}'
+```
 
 VeilRender accepts a URL and returns the fully rendered page content (HTML, Markdown, readability-extracted article) using a headless Chromium browser. Designed as a fallback for fetch tools that fail on JavaScript-rendered pages.
 

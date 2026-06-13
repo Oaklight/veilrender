@@ -8,6 +8,18 @@ on:
 jobs:
   deploy-hf:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - space_var: HF_SPACE
+            title: VeilRender
+            note: >-
+              > **Note / 注意**: This Space requires an API token. For a public demo, see
+              [veilrender-public](https://huggingface.co/spaces/oaklight/veilrender-public).
+          - space_var: HF_SPACE_PUBLIC
+            title: VeilRender Public
+            note: >-
+              > **Note / 注意**: This is a public demo with no auth. For production use, self-host via Docker with a token.
     steps:
       - uses: actions/checkout@v6
         with:
@@ -15,10 +27,13 @@ jobs:
           lfs: true
 
       - name: Prepare HF Space files
+        env:
+          SPACE_TITLE: ${{ matrix.title }}
+          SPACE_NOTE: ${{ matrix.note }}
         run: |
-          cat > README.md <<'FRONTMATTER'
+          cat > README.md <<FRONTMATTER
           ---
-          title: VeilRender
+          title: ${SPACE_TITLE}
           emoji: 👻
           colorFrom: gray
           colorTo: purple
@@ -27,28 +42,25 @@ jobs:
           pinned: false
           ---
 
-          # VeilRender
+          # ${SPACE_TITLE}
 
           Headless browser rendering API — accepts a URL, renders with headless Chromium, returns HTML / Markdown / readability content.
 
           无头浏览器渲染 API — 接收 URL，通过无头 Chromium 渲染，返回 HTML / Markdown / 可读性提取内容。
 
-          > **Note / 注意**: This Space is a demo instance with limited resources. For production use, self-host via Docker.
-          >
-          > 此 Space 为演示实例，资源有限。生产环境请通过 Docker 自行部署。
+          ${SPACE_NOTE}
 
           ## Links
 
           - **GitHub**: [Oaklight/veilrender](https://github.com/${{ github.repository }}) — source code, docs & issues
           - **Docker Hub**: [oaklight/veilrender](https://hub.docker.com/r/oaklight/veilrender) — pre-built multi-arch images
-          - **GHCR**: `ghcr.io/oaklight/veilrender`
           - **PyPI**: [veilrender](https://pypi.org/project/veilrender/)
 
           ## Quick Start
 
-          ```bash
+          \`\`\`bash
           docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret oaklight/veilrender
-          ```
+          \`\`\`
           FRONTMATTER
           sed -i 's/^          //' README.md
           rm -rf .github .pre-commit-config.yaml CLAUDE.md README_en.md README_zh.md Makefile BENCHMARK.md
@@ -56,10 +68,10 @@ jobs:
       - name: Push to HF Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_SPACE: ${{ vars.HF_SPACE }}  # e.g. oaklight/veilrender
+          HF_SPACE: ${{ vars[matrix.space_var] }}
         run: |
           if [ -z "$HF_SPACE" ]; then
-            echo "::warning::HF_SPACE variable not set, skipping HF deploy"
+            echo "::warning::${{ matrix.space_var }} variable not set, skipping"
             exit 0
           fi
           git config user.name "github-actions[bot]"
