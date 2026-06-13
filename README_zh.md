@@ -19,7 +19,7 @@ VeilRender 接收一个 URL，使用无头 Chromium 浏览器渲染页面，并�
 ### Docker
 
 ```bash
-docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret ghcr.io/oaklight/veilrender
+docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret oaklight/veilrender
 ```
 
 ### 本地开发

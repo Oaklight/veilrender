@@ -19,7 +19,7 @@ VeilRender accepts a URL and returns the fully rendered page content (HTML, Mark
 ### Docker
 
 ```bash
-docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret ghcr.io/oaklight/veilrender
+docker run -p 7860:7860 -e VEILRENDER_API_TOKEN=your-secret oaklight/veilrender
 ```
 
 ### Local Development
