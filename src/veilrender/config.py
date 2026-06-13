@@ -19,7 +19,7 @@ class Settings:
         self.viewport_height: int = int(
             os.environ.get("VEILRENDER_VIEWPORT_HEIGHT", "720")
         )
-        self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "3"))
+        self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "5"))
 
 
 settings = Settings()
