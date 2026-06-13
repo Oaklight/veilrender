@@ -25,7 +25,13 @@ _BADGES_HTML = """
 
 def _stats_row(name: str, ep: stats.EndpointStats) -> str:
     """Build an HTML table row for one endpoint."""
-    rate_class = "green" if ep.success_rate >= 95 else "yellow" if ep.success_rate >= 80 else "red"
+    rate_class = (
+        "green"
+        if ep.success_rate >= 95
+        else "yellow"
+        if ep.success_rate >= 80
+        else "red"
+    )
     return f"""
         <tr>
           <td><code>{name}</code></td>
@@ -49,7 +55,9 @@ def _build_html() -> str:
     total_fail = stats.render.failures + stats.screenshot.failures
 
     utilization = (active / max_conc * 100) if max_conc > 0 else 0
-    util_class = "green" if utilization < 70 else "yellow" if utilization < 90 else "red"
+    util_class = (
+        "green" if utilization < 70 else "yellow" if utilization < 90 else "red"
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -171,7 +179,7 @@ def _build_html() -> str:
       <div class="label">Capacity</div>
       <div class="value {util_class}">{active} <span style="font-size:0.8rem;color:#94a3b8">/ {max_conc}</span></div>
       <div class="bar-track">
-        <div class="bar-fill" style="width:{utilization:.0f}%;background:{'#4ade80' if utilization < 70 else '#facc15' if utilization < 90 else '#f87171'}"></div>
+        <div class="bar-fill" style="width:{utilization:.0f}%;background:{"#4ade80" if utilization < 70 else "#facc15" if utilization < 90 else "#f87171"}"></div>
       </div>
     </div>
     <div class="card">
@@ -184,7 +192,7 @@ def _build_html() -> str:
     </div>
     <div class="card">
       <div class="label">Failures</div>
-      <div class="value {'red' if total_fail > 0 else 'green'}">{total_fail}</div>
+      <div class="value {"red" if total_fail > 0 else "green"}">{total_fail}</div>
     </div>
   </div>
 
