@@ -1,0 +1,111 @@
+site_name: VeilRender
+site_description: 无头浏览器渲染 API——可自托管于 HF Spaces、Docker 或物理机
+site_author: Peng Ding
+site_url: https://veilrender.readthedocs.io/zh-cn/latest
+repo_name: Oaklight/veilrender
+repo_url: https://github.com/Oaklight/veilrender
+copyright: Copyright &copy; 2025 Peng Ding
+
+theme:
+  name: material
+  custom_dir: overrides
+  language: zh
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: 切换到浅色模式
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: 跟随系统偏好
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - navigation.path
+    - navigation.tracking
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.prune
+    - header.autohide
+    - toc.follow
+    - search.highlight
+    - search.share
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - content.code.select
+    - content.tabs.link
+    - content.tooltips
+    - content.footnote.tooltips
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Oaklight/veilrender
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/veilrender/
+    - icon: fontawesome/brands/docker
+      link: https://hub.docker.com/r/oaklight/veilrender
+  alternate:
+    - name: English
+      link: /en/latest/
+      lang: en
+    - name: 中文
+      link: /zh-cn/latest/
+      lang: zh
+
+nav:
+  - 首页: index.md
+  - 快速上手:
+      - 安装: getting-started/installation.md
+      - 快速开始: getting-started/quickstart.md
+  - API 参考:
+      - api/index.md
+      - POST /render: api/render.md
+      - POST /screenshot: api/screenshot.md
+      - GET /health: api/health.md
+      - GET / (仪表盘): api/dashboard.md
+  - 部署:
+      - deployment/index.md
+      - Docker: deployment/docker.md
+      - HF Spaces: deployment/hf-spaces.md
+      - 物理机部署: deployment/bare-metal.md
+  - 配置: configuration.md
+  - 性能测试: benchmark.md
+  - 更新日志: changelog.md
