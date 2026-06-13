@@ -79,6 +79,8 @@ endif
 	TMP=$$(mktemp -d); \
 	git clone --depth 1 . "$$TMP/repo"; \
 	cd "$$TMP/repo"; \
+	rm -f README.md README_en.md README_zh.md; \
+	rm -rf .github .pre-commit-config.yaml CLAUDE.md Makefile BENCHMARK.md; \
 	printf '%s\n' \
 		'---' \
 		'title: VeilRender' \
@@ -94,7 +96,6 @@ endif
 		'' \
 		'Headless browser rendering API. See [GitHub repo](https://github.com/Oaklight/veilrender) for full documentation.' \
 		> README.md; \
-	rm -rf .github .pre-commit-config.yaml CLAUDE.md README_en.md README_zh.md Makefile; \
 	git add -A; \
 	git commit -m "deploy $$COMMIT" --allow-empty; \
 	git push --force "https://oauth2:$${HF_TOKEN}@huggingface.co/spaces/$(HF_SPACE)" HEAD:main; \
