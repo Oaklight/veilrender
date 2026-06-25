@@ -20,6 +20,13 @@ class Settings:
             os.environ.get("VEILRENDER_VIEWPORT_HEIGHT", "720")
         )
         self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "5"))
+        self.resource_filter: bool = (
+            os.environ.get("VEILRENDER_RESOURCE_FILTER", "true").lower() == "true"
+        )
+        _extra = os.environ.get("VEILRENDER_BLOCKED_DOMAINS_EXTRA", "")
+        self.blocked_domains_extra: list[str] = (
+            [d.strip() for d in _extra.split(",") if d.strip()] if _extra else []
+        )
 
 
 settings = Settings()

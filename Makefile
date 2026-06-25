@@ -1,6 +1,7 @@
-.PHONY: dev build run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf help
+.PHONY: dev build run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf update-blocklist help
 
 REGISTRY_MIRROR ?= docker.io
+BLOCKLIST_URL := https://cdn.jsdelivr.net/gh/StevenBlack/hosts@master/hosts
 DOCKER_IMAGE := oaklight/veilrender
 VERSION := $(shell grep -oE '__version__[[:space:]]*=[[:space:]]*"[^"]+"' src/veilrender/__init__.py | grep -oE '"[^"]+"' | tr -d '"' || echo "0.1.0")
 
@@ -22,6 +23,12 @@ typecheck:
 
 vendor:
 	cd ~/projects/zerodep && python zerodep.py add httpserver readability soup markdown cache config useragent retry structlog -d $(CURDIR)/src/veilrender/_vendor/ -y -f
+
+update-blocklist:
+	curl -sL "$(BLOCKLIST_URL)" \
+	  | grep "^0.0.0.0 " | awk '{print $$2}' | grep -v "^0.0.0.0$$" \
+	  > src/veilrender/data/blocklist.txt
+	@echo "Updated blocklist: $$(wc -l < src/veilrender/data/blocklist.txt) domains"
 
 clean:
 	rm -rf build/ dist/ *.egg-info/ src/*.egg-info/
@@ -100,6 +107,7 @@ help:
 	@echo "  lint         - Run ruff check and format"
 	@echo "  typecheck    - Run ty check"
 	@echo "  vendor       - Re-vendor zerodep modules"
+	@echo "  update-blocklist - Update ad/tracker blocklist from StevenBlack/hosts"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  build-package - Build Python package"
 	@echo "  push-package  - Push package to PyPI"

@@ -12,6 +12,7 @@ from cloakbrowser import ensure_binary, get_default_stealth_args
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from veilrender.config import settings
+from veilrender.filters import load_blocklist, make_route_handler
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,14 @@ class BrowserManager:
         self._chrome_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
         self._semaphore = asyncio.Semaphore(settings.max_concurrent)
         self._lock = asyncio.Lock()
+
+        # Load blocklist once at init if resource filtering is enabled
+        if settings.resource_filter:
+            self._blocklist = load_blocklist(settings.blocked_domains_extra)
+            self._route_handler = make_route_handler(self._blocklist)
+        else:
+            self._blocklist = frozenset()
+            self._route_handler = None
 
     async def start(self) -> None:
         """Launch Chromium with CDP and connect Playwright to it."""
@@ -173,6 +182,8 @@ class BrowserManager:
                     user_agent=None,  # use Playwright default
                 )
                 page = await context.new_page()
+                if self._route_handler:
+                    await page.route("**/*", self._route_handler)
                 yield context, page
             finally:
                 if context:
