@@ -20,6 +20,7 @@ from veilrender.models import (
     RenderRequest,
     RenderResponse,
 )
+from veilrender.storage import storage_manager
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,18 @@ def register(app: App) -> None:
         stats.render.requests += 1
         t0 = time.monotonic()
 
+        # Check cache before rendering
+        cache_key: str | None = None
+        if storage_manager.enabled:
+            cache_key = storage_manager.make_key(req.url, req.formats, req.wait_until)
+            cached = await storage_manager.get(cache_key)
+            if cached is not None:
+                elapsed = (time.monotonic() - t0) * 1000
+                stats.render.cache_hits += 1
+                stats.render.record_success(elapsed)
+                return JSONResponse(cached)
+            stats.render.cache_misses += 1
+
         try:
             async with browser_manager.get_page() as (ctx, page):
                 response = await page.goto(
@@ -127,4 +140,13 @@ def register(app: App) -> None:
 
         elapsed = (time.monotonic() - t0) * 1000
         stats.render.record_success(elapsed)
-        return JSONResponse(result.to_dict())
+
+        # Store to cache
+        result_dict = result.to_dict()
+        if cache_key is not None:
+            try:
+                await storage_manager.put(cache_key, result_dict)
+            except Exception:
+                logger.debug("Cache store failed", exc_info=True)
+
+        return JSONResponse(result_dict)

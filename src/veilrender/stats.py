@@ -20,6 +20,8 @@ class EndpointStats:
     requests: int = 0
     successes: int = 0
     failures: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
     total_ms: float = 0.0
     _latencies: deque[float] = field(default_factory=lambda: deque(maxlen=1000))
 

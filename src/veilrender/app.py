@@ -12,6 +12,7 @@ from veilrender.browser import browser_manager
 from veilrender.cdp_proxy import handle_cdp_upgrade, is_websocket_upgrade
 from veilrender.config import settings
 from veilrender.routes import dashboard, health, render, screenshot
+from veilrender.storage import storage_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,6 +54,7 @@ def main() -> None:
 
     async def run_server() -> None:
         await browser_manager.start()
+        await storage_manager.ensure_bucket()
 
         shutdown_event = asyncio.Event()
 

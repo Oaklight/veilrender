@@ -28,5 +28,24 @@ class Settings:
             [d.strip() for d in _extra.split(",") if d.strip()] if _extra else []
         )
 
+        # Cache settings
+        self.cache_enabled: bool = (
+            os.environ.get("VEILRENDER_CACHE_ENABLED", "false").lower() == "true"
+        )
+        self.cache_ttl: int = int(os.environ.get("VEILRENDER_CACHE_TTL", "86400"))
+        self.cache_l1_maxsize: int = int(
+            os.environ.get("VEILRENDER_CACHE_L1_MAXSIZE", "100")
+        )
+
+        # S3-compatible storage (Cloudflare R2, Oracle Object Storage, etc.)
+        self.s3_endpoint: str | None = os.environ.get("VEILRENDER_S3_ENDPOINT")
+        self.s3_access_key: str | None = os.environ.get("VEILRENDER_S3_ACCESS_KEY")
+        self.s3_secret_key: str | None = os.environ.get("VEILRENDER_S3_SECRET_KEY")
+        self.s3_bucket: str = os.environ.get("VEILRENDER_S3_BUCKET", "veilrender-cache")
+        self.s3_region: str = os.environ.get("VEILRENDER_S3_REGION", "auto")
+        self.s3_secure: bool = (
+            os.environ.get("VEILRENDER_S3_SECURE", "true").lower() == "true"
+        )
+
 
 settings = Settings()
