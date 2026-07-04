@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-26
+
+### Added
+
+- Outbound request filtering using [StevenBlack/hosts](https://github.com/StevenBlack/hosts) community blocklist (~82k ad/tracker/malware domains), blocking at the Playwright level via `page.route()` ([#21])
+- Two-tier render cache: L1 in-memory `TTLCache` + L2 S3-compatible persistent storage via `minio` client — supports Cloudflare R2, Oracle Object Storage, AWS S3, etc. ([#21])
+- L2 TTL enforcement via embedded `_stored_at` timestamp, checked on read
+- S3 lifecycle rule auto-set on startup (7× TTL expiry as bulk cleanup safety net)
+- `make update-blocklist` target to refresh blocklist from jsDelivr CDN
+- New env vars: `VEILRENDER_RESOURCE_FILTER`, `VEILRENDER_CACHE_ENABLED`, `VEILRENDER_CACHE_TTL`, `VEILRENDER_S3_ENDPOINT`, etc.
+
+## [0.2.0] - 2026-06-13
+
+### Added
+
+- Stats dashboard at `GET /` with badges, capacity bar, and responsive layout ([#20])
+- Public HF Space (no auth) with live demo badge
+- `.dockerignore` and Docker safety CI
+
+### Changed
+
+- Bump default `max_concurrent` from 3 to 5
+- Pre-download Chromium as runtime user to avoid re-download on startup
+
+### Fixed
+
+- HF Space deploy: delete symlink before writing README
+- Pre-commit formatting for dashboard.py
+
 ## [0.1.0] - 2026-06-12
 
 ### Added
@@ -36,7 +65,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Oaklight/veilrender/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Oaklight/veilrender/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Oaklight/veilrender/releases/tag/v0.1.0
 
 [#1]: https://github.com/Oaklight/veilrender/issues/1
@@ -56,3 +87,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#15]: https://github.com/Oaklight/veilrender/pull/15
 [#16]: https://github.com/Oaklight/veilrender/issues/16
 [#17]: https://github.com/Oaklight/veilrender/pull/17
+[#20]: https://github.com/Oaklight/veilrender/pull/20
+[#21]: https://github.com/Oaklight/veilrender/pull/21
