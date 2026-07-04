@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-04
+
+### Added
+
+- URL validation before rendering: only `http://` and `https://` schemes allowed; `file://`, `data:`, `javascript:` blocked
+- DNS resolution with private IP blocking: loopback, RFC1918, link-local, cloud metadata (169.254.x.x) all rejected — prevents SSRF
+- Fail2ban-style IP rate limiting: 3 auth failures in 5 minutes → 10 minute ban, with `X-Forwarded-For` support
+
+### Changed
+
+- Reduce `max_body_size` from 10 MB to 64 KB — render/screenshot payloads are small JSON
+- Promote blocked-request filter log from DEBUG to INFO for production visibility
+
+### Fixed
+
+- **CRITICAL**: SSRF via `file:///etc/passwd` — Playwright `page.goto()` accepted arbitrary schemes
+- **CRITICAL**: SSRF via `http://127.0.0.1:9222` — CDP debug endpoint exposed WebSocket URLs enabling RCE
+- **CRITICAL**: No URL validation — user-supplied URLs forwarded to Playwright without sanitization
+- **MEDIUM**: `data:` URLs accepted — attacker could render arbitrary HTML content
+
 ## [0.3.0] - 2026-06-26
 
 ### Added
@@ -65,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Oaklight/veilrender/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Oaklight/veilrender/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Oaklight/veilrender/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Oaklight/veilrender/releases/tag/v0.1.0
