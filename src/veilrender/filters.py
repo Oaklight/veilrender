@@ -93,7 +93,7 @@ def make_route_handler(blocklist: frozenset[str]):
     async def _handle_route(route: Route) -> None:
         url = route.request.url
         if should_block(url, blocklist):
-            logger.debug("Blocked: %s", url[:200])
+            logger.info("Blocked: %s", url[:200])
             await route.abort("blockedbyclient")
         else:
             await route.continue_()

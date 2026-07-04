@@ -37,7 +37,9 @@ async def _pipe(source: asyncio.StreamReader, dest: asyncio.StreamReader) -> Non
 
 def create_app() -> App:
     """Create and configure the VeilRender application."""
-    app = App(max_body_size=10 * 1024 * 1024)  # 10 MB
+    app = App(
+        max_body_size=64 * 1024
+    )  # 64 KB — render/screenshot payloads are small JSON
 
     # Register routes
     health.register(app)

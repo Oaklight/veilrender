@@ -21,6 +21,7 @@ from veilrender.models import (
     RenderResponse,
 )
 from veilrender.storage import storage_manager
+from veilrender.url_validator import URLValidationError, validate_url
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,13 @@ def register(app: App) -> None:
             return JSONResponse({"error": "Missing 'url' field"}, status_code=400)
 
         req = RenderRequest.from_dict(data)
+
+        # Validate URL before any processing
+        try:
+            validate_url(req.url)
+        except URLValidationError as exc:
+            return JSONResponse({"error": f"URL rejected: {exc!s}"}, status_code=400)
+
         timeout = req.timeout or settings.timeout
         stats.render.requests += 1
         t0 = time.monotonic()

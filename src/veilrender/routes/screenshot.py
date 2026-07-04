@@ -11,6 +11,7 @@ from veilrender.auth import verify_token
 from veilrender.browser import browser_manager
 from veilrender.config import settings
 from veilrender.models import ScreenshotRequest
+from veilrender.url_validator import URLValidationError, validate_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,17 @@ def register(app: App) -> None:
             )
 
         req = ScreenshotRequest.from_dict(data)
+
+        # Validate URL before any processing
+        try:
+            validate_url(req.url)
+        except URLValidationError as exc:
+            return Response(
+                body=f'{{"error": "URL rejected: {exc!s}"}}'.encode(),
+                status_code=400,
+                content_type="application/json",
+            )
+
         timeout = req.timeout or settings.timeout
         stats.screenshot.requests += 1
         t0 = time.monotonic()
