@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 
 from veilrender import stats
 from veilrender._vendor.httpserver import App, Request, Response
@@ -23,6 +24,9 @@ _BADGES_HTML = f"""
     </a>
 
 """
+
+_RING_RADIUS = 40
+_RING_CIRCUMFERENCE = 2 * math.pi * _RING_RADIUS
 
 
 def _stats_json() -> dict:
@@ -79,20 +83,20 @@ def _stats_row(name: str, ep: stats.EndpointStats) -> str:
 
 def _capacity_ring(active: int, max_conc: int, utilization: float) -> str:
     """Build an SVG ring gauge for capacity."""
-    radius = 40
-    circumference = 2 * 3.14159 * radius
-    filled = circumference * utilization / 100
-    gap = circumference - filled
+    filled = _RING_CIRCUMFERENCE * utilization / 100
+    gap = _RING_CIRCUMFERENCE - filled
     color = (
         "#6ee7b7" if utilization < 70 else "#fbbf24" if utilization < 90 else "#f87171"
     )
     return f"""
-    <svg viewBox="0 0 100 100" class="ring-gauge">
-      <circle cx="50" cy="50" r="{radius}" fill="none"
+    <svg viewBox="0 0 100 100" class="ring-gauge"
+         role="img" aria-label="Capacity: {active} of {max_conc}"
+         data-circ="{_RING_CIRCUMFERENCE:.4f}">
+      <circle cx="50" cy="50" r="{_RING_RADIUS}" fill="none"
               stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
-      <circle cx="50" cy="50" r="{radius}" fill="none" id="ring-fill"
+      <circle cx="50" cy="50" r="{_RING_RADIUS}" fill="none" id="ring-fill"
               stroke="{color}" stroke-width="6"
-              stroke-dasharray="{filled:.1f} {gap:.1f}"
+              stroke-dasharray="{filled:.4f} {gap:.4f}"
               stroke-linecap="round"
               transform="rotate(-90 50 50)"
               style="filter:drop-shadow(0 0 6px {color}50);transition:stroke-dasharray .6s,stroke .6s"/>
@@ -103,18 +107,12 @@ def _capacity_ring(active: int, max_conc: int, utilization: float) -> str:
 
 def _build_html() -> str:
     """Build the dashboard HTML."""
-    browser_alive = browser_manager.is_browser_alive
-    browser_label = "alive" if browser_alive else "dead"
-    dot_cls = "dot-on" if browser_alive else "dot-off"
-    active = browser_manager.active_pages
-    max_conc = settings.max_concurrent
+    d = _stats_json()
+    browser_label = "alive" if d["browser_alive"] else "dead"
+    dot_cls = "dot-on" if d["browser_alive"] else "dot-off"
+    fail_cls = "c-err" if d["total_failures"] > 0 else "c-ok"
 
-    total_req = stats.render.requests + stats.screenshot.requests
-    total_ok = stats.render.successes + stats.screenshot.successes
-    total_fail = stats.render.failures + stats.screenshot.failures
-
-    utilization = (active / max_conc * 100) if max_conc > 0 else 0
-    ring_svg = _capacity_ring(active, max_conc, utilization)
+    ring_svg = _capacity_ring(d["active"], d["max_concurrent"], d["utilization"])
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -151,6 +149,7 @@ def _build_html() -> str:
       color: var(--text);
       min-height: 100vh;
     }}
+    body.stale {{ opacity: 0.5; transition: opacity 0.5s; }}
 
     body::before {{
       content: '';
@@ -370,7 +369,7 @@ def _build_html() -> str:
     </div>
     <div class="card">
       <span class="s-label" data-i18n="uptime">Uptime</span>
-      <span class="s-val" id="uptime-val">{stats.format_uptime()}</span>
+      <span class="s-val" id="uptime-val">{d["uptime"]}</span>
     </div>
   </div>
 
@@ -383,15 +382,15 @@ def _build_html() -> str:
     <div class="nums">
       <div class="card num">
         <div class="lbl" data-i18n="requests">Requests</div>
-        <div class="val c-mint" id="total-req">{total_req}</div>
+        <div class="val c-mint" id="total-req">{d["total_requests"]}</div>
       </div>
       <div class="card num">
         <div class="lbl" data-i18n="successes">Successes</div>
-        <div class="val c-ok" id="total-ok">{total_ok}</div>
+        <div class="val c-ok" id="total-ok">{d["total_successes"]}</div>
       </div>
       <div class="card num">
         <div class="lbl" data-i18n="failures">Failures</div>
-        <div class="val {"c-err" if total_fail > 0 else "c-ok"}" id="total-fail">{total_fail}</div>
+        <div class="val {fail_cls}" id="total-fail">{d["total_failures"]}</div>
       </div>
     </div>
   </div>
@@ -431,7 +430,7 @@ def _build_html() -> str:
 <script>
 (function() {{
   /* ——— i18n ——— */
-  var I18N = {{
+  const I18N = {{
     en: {{
       _label: 'English',
       sec_status: 'Status',
@@ -480,12 +479,11 @@ def _build_html() -> str:
     }}
   }};
 
-  var lang = localStorage.getItem('vr_lang') || 'en';
-  var sel = document.getElementById('lang-sel');
+  let lang = localStorage.getItem('vr_lang') || 'en';
+  const sel = document.getElementById('lang-sel');
 
-  // Populate select options from I18N keys
-  Object.keys(I18N).forEach(function(k) {{
-    var opt = document.createElement('option');
+  Object.keys(I18N).forEach(k => {{
+    const opt = document.createElement('option');
     opt.value = k;
     opt.textContent = I18N[k]._label;
     sel.appendChild(opt);
@@ -495,43 +493,45 @@ def _build_html() -> str:
     lang = l;
     localStorage.setItem('vr_lang', l);
     sel.value = l;
-    var t = I18N[l];
-    document.querySelectorAll('[data-i18n]').forEach(function(el) {{
-      var key = el.getAttribute('data-i18n');
+    const t = I18N[l];
+    document.querySelectorAll('[data-i18n]').forEach(el => {{
+      const key = el.getAttribute('data-i18n');
       if (t[key] != null) el.textContent = t[key];
     }});
-    var bv = document.getElementById('browser-val');
+    const bv = document.getElementById('browser-val');
     if (bv.getAttribute('data-i18n-key') === 'browser_status') {{
-      var alive = document.getElementById('dot').classList.contains('dot-on');
+      const alive = document.getElementById('dot').classList.contains('dot-on');
       bv.textContent = alive ? t.alive : t.dead;
     }}
     document.documentElement.lang = l;
   }}
 
-  window.setLang = function(l) {{ applyLang(l); }};
-
+  window.setLang = l => applyLang(l);
   applyLang(lang);
 
   /* ——— Live data polling ——— */
-  var CIRC = 2 * Math.PI * 40;
-  function rateClass(r) {{ return r >= 95 ? 'c-ok' : r >= 80 ? 'c-warn' : 'c-err'; }}
-  function ringColor(u) {{ return u < 70 ? '#6ee7b7' : u < 90 ? '#fbbf24' : '#f87171'; }}
+  const CIRC = parseFloat(document.querySelector('.ring-gauge').dataset.circ);
+  const rateClass = r => r >= 95 ? 'c-ok' : r >= 80 ? 'c-warn' : 'c-err';
+  const ringColor = u => u < 70 ? '#6ee7b7' : u < 90 ? '#fbbf24' : '#f87171';
+  let fails = 0;
 
   function update() {{
-    fetch('/stats').then(function(r) {{ return r.json(); }}).then(function(d) {{
-      var t = I18N[lang];
+    fetch('/stats').then(r => r.json()).then(d => {{
+      fails = 0;
+      document.body.classList.remove('stale');
+      const t = I18N[lang];
 
-      var dot = document.getElementById('dot');
+      const dot = document.getElementById('dot');
       dot.className = 'dot ' + (d.browser_alive ? 'dot-on' : 'dot-off');
       document.getElementById('browser-val').textContent = d.browser_alive ? t.alive : t.dead;
       document.getElementById('uptime-val').textContent = d.uptime;
 
-      var u = d.utilization;
-      var filled = CIRC * u / 100;
-      var gap = CIRC - filled;
-      var col = ringColor(u);
-      var ring = document.getElementById('ring-fill');
-      ring.setAttribute('stroke-dasharray', filled.toFixed(1) + ' ' + gap.toFixed(1));
+      const u = d.utilization;
+      const filled = CIRC * u / 100;
+      const gap = CIRC - filled;
+      const col = ringColor(u);
+      const ring = document.getElementById('ring-fill');
+      ring.setAttribute('stroke-dasharray', filled.toFixed(4) + ' ' + gap.toFixed(4));
       ring.setAttribute('stroke', col);
       ring.style.filter = 'drop-shadow(0 0 6px ' + col + '50)';
       document.getElementById('ring-active').textContent = d.active;
@@ -539,16 +539,15 @@ def _build_html() -> str:
 
       document.getElementById('total-req').textContent = d.total_requests;
       document.getElementById('total-ok').textContent = d.total_successes;
-      var failEl = document.getElementById('total-fail');
+      const failEl = document.getElementById('total-fail');
       failEl.textContent = d.total_failures;
       failEl.className = 'val ' + (d.total_failures > 0 ? 'c-err' : 'c-ok');
 
-      var eps = d.endpoints;
-      for (var name in eps) {{
-        var e = eps[name];
-        var cells = document.querySelectorAll('[data-ep="' + name + '"]');
-        cells.forEach(function(c) {{
-          var f = c.getAttribute('data-f');
+      const eps = d.endpoints;
+      for (const name in eps) {{
+        const e = eps[name];
+        document.querySelectorAll('[data-ep="' + name + '"]').forEach(c => {{
+          const f = c.getAttribute('data-f');
           if (f === 'requests') c.textContent = e.requests;
           else if (f === 'successes') c.textContent = e.successes;
           else if (f === 'failures') c.textContent = e.failures;
@@ -560,10 +559,21 @@ def _build_html() -> str:
           else if (f === 'p95') c.textContent = e.p95_ms + ' ms';
         }});
       }}
-    }}).catch(function() {{}});
+    }}).catch(() => {{
+      fails++;
+      if (fails >= 3) document.body.classList.add('stale');
+    }});
   }}
 
-  setInterval(update, 5000);
+  let tid = setInterval(update, 5000);
+  document.addEventListener('visibilitychange', () => {{
+    if (document.hidden) {{
+      clearInterval(tid);
+    }} else {{
+      update();
+      tid = setInterval(update, 5000);
+    }}
+  }});
 }})();
 </script>
 </body>
@@ -587,4 +597,5 @@ def register(app: App) -> None:
             body=json.dumps(_stats_json()),
             status_code=200,
             content_type="application/json",
+            headers={"Cache-Control": "no-store"},
         )
