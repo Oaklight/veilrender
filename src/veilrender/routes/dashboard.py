@@ -419,7 +419,7 @@ def _build_html() -> str:
   <div class="ftr in d4">
     <div class="ftr-row">
       <span data-i18n="footer_info">Live updates every 5 s · stats are in-memory, reset on restart</span>
-      <span data-i18n="footer_author">Built by <a href="https://github.com/Oaklight">Oaklight</a> · <a href="https://github.com/Oaklight/veilrender">source on GitHub</a></span>
+      <span data-i18n-html="footer_author">Built by <a href="https://github.com/Oaklight">Oaklight</a> · <a href="https://github.com/Oaklight/veilrender">source on GitHub</a></span>
     </div>
     <div class="ftr-badges">
       {_BADGES_HTML}
@@ -450,7 +450,7 @@ def _build_html() -> str:
       th_avg: 'Avg Latency',
       th_p95: 'P95 Latency',
       footer_info: 'Live updates every 5 s · stats are in-memory, reset on restart',
-      footer_author: 'Built by Oaklight · source on GitHub',
+      footer_author: 'Built by <a href="https://github.com/Oaklight">Oaklight</a> · <a href="https://github.com/Oaklight/veilrender">source on GitHub</a>',
       alive: 'alive',
       dead: 'dead'
     }},
@@ -473,7 +473,7 @@ def _build_html() -> str:
       th_avg: '平均延迟',
       th_p95: 'P95 延迟',
       footer_info: '每 5 秒自动更新 · 统计数据存储在内存中，重启后重置',
-      footer_author: '由 Oaklight 构建 · 源码见 GitHub',
+      footer_author: '由 <a href="https://github.com/Oaklight">Oaklight</a> 构建 · <a href="https://github.com/Oaklight/veilrender">源码见 GitHub</a>',
       alive: '运行中',
       dead: '已停止'
     }}
@@ -497,6 +497,10 @@ def _build_html() -> str:
     document.querySelectorAll('[data-i18n]').forEach(el => {{
       const key = el.getAttribute('data-i18n');
       if (t[key] != null) el.textContent = t[key];
+    }});
+    document.querySelectorAll('[data-i18n-html]').forEach(el => {{
+      const key = el.getAttribute('data-i18n-html');
+      if (t[key] != null) el.innerHTML = t[key];
     }});
     const bv = document.getElementById('browser-val');
     if (bv.getAttribute('data-i18n-key') === 'browser_status') {{
