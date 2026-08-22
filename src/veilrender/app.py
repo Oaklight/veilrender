@@ -11,7 +11,7 @@ from veilrender._vendor.httpserver import App
 from veilrender.browser import browser_manager
 from veilrender.cdp_proxy import handle_cdp_upgrade, is_websocket_upgrade
 from veilrender.config import settings
-from veilrender.routes import dashboard, health, render, screenshot
+from veilrender.routes import dashboard, health, metrics, render, screenshot
 from veilrender.storage import storage_manager
 
 logging.basicConfig(
@@ -44,6 +44,7 @@ def create_app() -> App:
     # Register routes
     health.register(app)
     dashboard.register(app)
+    metrics.register(app)
     render.register(app)
     screenshot.register(app)
 
