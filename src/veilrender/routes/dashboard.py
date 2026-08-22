@@ -186,10 +186,22 @@ def _build_html() -> str:
       color: var(--mint);
     }}
     .brand h1 span {{ color: var(--text); }}
-    .badges {{ display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }}
-    .badges a {{ text-decoration: none; opacity: 0.6; transition: opacity 0.2s; }}
-    .badges a:hover {{ opacity: 1; }}
-    .badges img {{ height: 18px; vertical-align: middle; }}
+
+    /* Lang select */
+    .lang-sel {{
+      font-family: var(--ff); font-size: 0.7rem; font-weight: 500;
+      background: var(--surface); color: var(--text-2);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 0.3rem 0.5rem; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+      -webkit-appearance: none; appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%234a6650'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.4rem center;
+      padding-right: 1.3rem;
+    }}
+    .lang-sel:hover {{ border-color: var(--border-hi); color: var(--text); }}
+    .lang-sel option {{ background: var(--surface); color: var(--text); }}
 
     /* Section label */
     .sec {{
@@ -245,7 +257,11 @@ def _build_html() -> str:
     }}
     .ring-card {{
       padding: 1.4rem;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem;
+    }}
+    .ring-lbl {{
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-2);
     }}
     .ring-gauge {{ width: 120px; height: 120px; }}
     .ring-num {{
@@ -295,11 +311,22 @@ def _build_html() -> str:
 
     /* Footer */
     .ftr {{
-      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
       font-size: 0.7rem; color: var(--text-3);
       padding-top: 1.25rem;
       border-top: 1px solid var(--border);
+      display: flex; flex-direction: column; gap: 0.75rem;
     }}
+    .ftr a {{ color: var(--mint-dim); text-decoration: none; }}
+    .ftr a:hover {{ color: var(--mint); }}
+    .ftr-row {{
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+    }}
+    .ftr-badges {{
+      display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;
+    }}
+    .ftr-badges a {{ opacity: 0.6; transition: opacity 0.2s; }}
+    .ftr-badges a:hover {{ opacity: 1; }}
+    .ftr-badges img {{ height: 18px; vertical-align: middle; }}
 
     /* Responsive */
     @media (max-width: 720px) {{
@@ -331,57 +358,56 @@ def _build_html() -> str:
       <span class="ghost">👻</span>
       <h1>Veil<span>Render</span></h1>
     </div>
-    <div class="badges">
-      {_BADGES_HTML}
-    </div>
+    <select class="lang-sel" id="lang-sel" onchange="setLang(this.value)"></select>
   </div>
 
-  <div class="sec in d1">Status</div>
+  <div class="sec in d1" data-i18n="sec_status">Status</div>
   <div class="status in d2">
     <div class="card">
       <span class="dot {dot_cls}" id="dot"></span>
-      <span class="s-label">Browser</span>
-      <span class="s-val" id="browser-val">{browser_label}</span>
+      <span class="s-label" data-i18n="browser">Browser</span>
+      <span class="s-val" id="browser-val" data-i18n-key="browser_status">{browser_label}</span>
     </div>
     <div class="card">
-      <span class="s-label">Uptime</span>
+      <span class="s-label" data-i18n="uptime">Uptime</span>
       <span class="s-val" id="uptime-val">{stats.format_uptime()}</span>
     </div>
   </div>
 
-  <div class="sec in d2">Metrics</div>
+  <div class="sec in d2" data-i18n="sec_metrics">Metrics</div>
   <div class="metrics in d3">
     <div class="card ring-card">
       {ring_svg}
+      <div class="ring-lbl" data-i18n="capacity">Capacity</div>
     </div>
     <div class="nums">
       <div class="card num">
-        <div class="lbl">Requests</div>
+        <div class="lbl" data-i18n="requests">Requests</div>
         <div class="val c-mint" id="total-req">{total_req}</div>
       </div>
       <div class="card num">
-        <div class="lbl">Successes</div>
+        <div class="lbl" data-i18n="successes">Successes</div>
         <div class="val c-ok" id="total-ok">{total_ok}</div>
       </div>
       <div class="card num">
-        <div class="lbl">Failures</div>
+        <div class="lbl" data-i18n="failures">Failures</div>
         <div class="val {"c-err" if total_fail > 0 else "c-ok"}" id="total-fail">{total_fail}</div>
       </div>
     </div>
   </div>
 
-  <div class="sec in d3">Endpoints</div>
+  <div class="sec in d3" data-i18n="sec_endpoints">Endpoints</div>
   <div class="card tbl in d4">
     <table>
       <thead>
         <tr>
-          <th>Endpoint</th>
-          <th>Requests</th>
-          <th>Success</th>
-          <th>Failure</th>
-          <th>Rate</th>
-          <th>Avg Latency</th>
-          <th>P95 Latency</th>
+          <th data-i18n="th_endpoint">Endpoint</th>
+          <th data-i18n="th_requests">Requests</th>
+          <th data-i18n="th_success">Success</th>
+          <th data-i18n="th_failure">Failure</th>
+          <th data-i18n="th_rate">Rate</th>
+          <th data-i18n="th_avg">Avg Latency</th>
+          <th data-i18n="th_p95">P95 Latency</th>
         </tr>
       </thead>
       <tbody>
@@ -392,26 +418,114 @@ def _build_html() -> str:
   </div>
 
   <div class="ftr in d4">
-    <span>Live updates every 5 s &middot; stats are in-memory, reset on restart</span>
-    <span>VeilRender &middot; headless browser rendering API</span>
+    <div class="ftr-row">
+      <span data-i18n="footer_info">Live updates every 5 s · stats are in-memory, reset on restart</span>
+      <span data-i18n="footer_author">Built by <a href="https://github.com/Oaklight">Oaklight</a> · <a href="https://github.com/Oaklight/veilrender">source on GitHub</a></span>
+    </div>
+    <div class="ftr-badges">
+      {_BADGES_HTML}
+    </div>
   </div>
 
 </div>
 <script>
 (function() {{
+  /* ——— i18n ——— */
+  var I18N = {{
+    en: {{
+      _label: 'English',
+      sec_status: 'Status',
+      sec_metrics: 'Metrics',
+      sec_endpoints: 'Endpoints',
+      browser: 'Browser',
+      uptime: 'Uptime',
+      capacity: 'Capacity',
+      requests: 'Requests',
+      successes: 'Successes',
+      failures: 'Failures',
+      th_endpoint: 'Endpoint',
+      th_requests: 'Requests',
+      th_success: 'Success',
+      th_failure: 'Failure',
+      th_rate: 'Rate',
+      th_avg: 'Avg Latency',
+      th_p95: 'P95 Latency',
+      footer_info: 'Live updates every 5 s · stats are in-memory, reset on restart',
+      footer_author: 'Built by Oaklight · source on GitHub',
+      alive: 'alive',
+      dead: 'dead'
+    }},
+    zh: {{
+      _label: '中文',
+      sec_status: '状态',
+      sec_metrics: '指标',
+      sec_endpoints: '接口',
+      browser: '浏览器',
+      uptime: '运行时间',
+      capacity: '容量',
+      requests: '请求数',
+      successes: '成功',
+      failures: '失败',
+      th_endpoint: '接口',
+      th_requests: '请求',
+      th_success: '成功',
+      th_failure: '失败',
+      th_rate: '成功率',
+      th_avg: '平均延迟',
+      th_p95: 'P95 延迟',
+      footer_info: '每 5 秒自动更新 · 统计数据存储在内存中，重启后重置',
+      footer_author: '由 Oaklight 构建 · 源码见 GitHub',
+      alive: '运行中',
+      dead: '已停止'
+    }}
+  }};
+
+  var lang = localStorage.getItem('vr_lang') || 'en';
+  var sel = document.getElementById('lang-sel');
+
+  // Populate select options from I18N keys
+  Object.keys(I18N).forEach(function(k) {{
+    var opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = I18N[k]._label;
+    sel.appendChild(opt);
+  }});
+
+  function applyLang(l) {{
+    lang = l;
+    localStorage.setItem('vr_lang', l);
+    sel.value = l;
+    var t = I18N[l];
+    document.querySelectorAll('[data-i18n]').forEach(function(el) {{
+      var key = el.getAttribute('data-i18n');
+      if (t[key] != null) el.textContent = t[key];
+    }});
+    var bv = document.getElementById('browser-val');
+    if (bv.getAttribute('data-i18n-key') === 'browser_status') {{
+      var alive = document.getElementById('dot').classList.contains('dot-on');
+      bv.textContent = alive ? t.alive : t.dead;
+    }}
+    document.documentElement.lang = l;
+  }}
+
+  window.setLang = function(l) {{ applyLang(l); }};
+
+  applyLang(lang);
+
+  /* ——— Live data polling ——— */
   var CIRC = 2 * Math.PI * 40;
   function rateClass(r) {{ return r >= 95 ? 'c-ok' : r >= 80 ? 'c-warn' : 'c-err'; }}
   function ringColor(u) {{ return u < 70 ? '#6ee7b7' : u < 90 ? '#fbbf24' : '#f87171'; }}
 
   function update() {{
     fetch('/stats').then(function(r) {{ return r.json(); }}).then(function(d) {{
-      // Browser status
+      var t = I18N[lang];
+
       var dot = document.getElementById('dot');
       dot.className = 'dot ' + (d.browser_alive ? 'dot-on' : 'dot-off');
-      document.getElementById('browser-val').textContent = d.browser_alive ? 'alive' : 'dead';
+      document.getElementById('browser-val').textContent = d.browser_alive ? t.alive : t.dead;
       document.getElementById('uptime-val').textContent = d.uptime;
 
-      // Ring gauge
       var u = d.utilization;
       var filled = CIRC * u / 100;
       var gap = CIRC - filled;
@@ -423,14 +537,12 @@ def _build_html() -> str:
       document.getElementById('ring-active').textContent = d.active;
       document.getElementById('ring-max').textContent = '/ ' + d.max_concurrent;
 
-      // Totals
       document.getElementById('total-req').textContent = d.total_requests;
       document.getElementById('total-ok').textContent = d.total_successes;
       var failEl = document.getElementById('total-fail');
       failEl.textContent = d.total_failures;
       failEl.className = 'val ' + (d.total_failures > 0 ? 'c-err' : 'c-ok');
 
-      // Endpoint rows
       var eps = d.endpoints;
       for (var name in eps) {{
         var e = eps[name];
