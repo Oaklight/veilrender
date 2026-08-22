@@ -43,14 +43,23 @@ class EndpointStats:
         total = self.successes + self.failures
         return self.total_ms / total if total > 0 else 0.0
 
-    @property
-    def p95_ms(self) -> float:
-        """95th percentile latency in milliseconds."""
+    def _percentile(self, q: float) -> float:
+        """Compute a percentile from the latency window."""
         if not self._latencies:
             return 0.0
         sorted_lat = sorted(self._latencies)
-        idx = int(len(sorted_lat) * 0.95)
+        idx = int(len(sorted_lat) * q)
         return sorted_lat[min(idx, len(sorted_lat) - 1)]
+
+    @property
+    def p50_ms(self) -> float:
+        """50th percentile (median) latency in milliseconds."""
+        return self._percentile(0.50)
+
+    @property
+    def p95_ms(self) -> float:
+        """95th percentile latency in milliseconds."""
+        return self._percentile(0.95)
 
     @property
     def success_rate(self) -> float:
