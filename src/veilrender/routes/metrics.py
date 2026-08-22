@@ -55,29 +55,36 @@ def _build_metrics() -> str:
 
     # Counters — cache
     lines = [
-        "# HELP veilrender_cache_total Cache hits and misses by endpoint.\n",
-        "# TYPE veilrender_cache_total counter\n",
+        "# HELP veilrender_cache_lookups_total Cache lookups by endpoint and result.\n",
+        "# TYPE veilrender_cache_lookups_total counter\n",
     ]
     for name, ep in _ENDPOINTS:
         lines.append(
-            f'veilrender_cache_total{{endpoint="{name}",result="hit"}} {ep.cache_hits}\n'
+            f'veilrender_cache_lookups_total{{endpoint="{name}",result="hit"}} {ep.cache_hits}\n'
         )
         lines.append(
-            f'veilrender_cache_total{{endpoint="{name}",result="miss"}} {ep.cache_misses}\n'
+            f'veilrender_cache_lookups_total{{endpoint="{name}",result="miss"}} {ep.cache_misses}\n'
         )
     parts.append("".join(lines))
 
-    # Latency
+    # Latency — summary with quantiles, _sum, _count
     lines = [
-        "# HELP veilrender_request_duration_ms Request latency in milliseconds.\n",
-        "# TYPE veilrender_request_duration_ms summary\n",
+        "# HELP veilrender_request_duration_seconds Request latency in seconds.\n",
+        "# TYPE veilrender_request_duration_seconds summary\n",
     ]
     for name, ep in _ENDPOINTS:
+        count = ep.successes + ep.failures
         lines.append(
-            f'veilrender_request_duration_ms{{endpoint="{name}",quantile="0.5"}} {ep.avg_ms:.1f}\n'
+            f'veilrender_request_duration_seconds{{endpoint="{name}",quantile="0.5"}} {ep.p50_ms / 1000:.6f}\n'
         )
         lines.append(
-            f'veilrender_request_duration_ms{{endpoint="{name}",quantile="0.95"}} {ep.p95_ms:.1f}\n'
+            f'veilrender_request_duration_seconds{{endpoint="{name}",quantile="0.95"}} {ep.p95_ms / 1000:.6f}\n'
+        )
+        lines.append(
+            f'veilrender_request_duration_seconds_sum{{endpoint="{name}"}} {ep.total_ms / 1000:.6f}\n'
+        )
+        lines.append(
+            f'veilrender_request_duration_seconds_count{{endpoint="{name}"}} {count}\n'
         )
     parts.append("".join(lines))
 
