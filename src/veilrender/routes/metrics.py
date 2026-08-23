@@ -10,7 +10,7 @@ _CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 _ENDPOINTS = (("/render", stats.render), ("/screenshot", stats.screenshot))
 
 
-def _build_metrics() -> str:
+async def _build_metrics() -> str:
     """Build Prometheus exposition text."""
     active = browser_manager.active_pages
     alive = 1 if browser_manager.is_browser_alive else 0
@@ -39,7 +39,7 @@ def _build_metrics() -> str:
     )
 
     # Per-worker gauges
-    workers = browser_manager.worker_stats()
+    workers = await browser_manager.worker_stats()
     if len(workers) > 1 or (workers and workers[0]["endpoint"] != "local"):
         lines = [
             "# HELP veilrender_worker_healthy Whether a worker is healthy.\n",
@@ -53,7 +53,7 @@ def _build_metrics() -> str:
         parts.append("".join(lines))
 
         lines = [
-            "# HELP veilrender_worker_active_pages Active pages per worker.\n",
+            "# HELP veilrender_worker_active_pages Active pages per worker (semaphore).\n",
             "# TYPE veilrender_worker_active_pages gauge\n",
         ]
         for ws in workers:
@@ -61,6 +61,19 @@ def _build_metrics() -> str:
                 f'veilrender_worker_active_pages{{worker="{ws["index"]}",endpoint="{ws["endpoint"]}"}} '
                 f"{ws['active']}\n"
             )
+        parts.append("".join(lines))
+
+        lines = [
+            "# HELP veilrender_worker_browser_pages Actual open pages in browser.\n",
+            "# TYPE veilrender_worker_browser_pages gauge\n",
+        ]
+        for ws in workers:
+            bp = ws.get("browser_pages", -1)
+            if bp >= 0:
+                lines.append(
+                    f'veilrender_worker_browser_pages{{worker="{ws["index"]}",endpoint="{ws["endpoint"]}"}} '
+                    f"{bp}\n"
+                )
         parts.append("".join(lines))
 
     # Counters — requests
@@ -121,7 +134,7 @@ def register(app: App) -> None:
     @app.get("/metrics")
     async def metrics(request: Request) -> Response:
         return Response(
-            body=_build_metrics(),
+            body=await _build_metrics(),
             status_code=200,
             content_type=_CONTENT_TYPE,
             headers={"Cache-Control": "no-store"},

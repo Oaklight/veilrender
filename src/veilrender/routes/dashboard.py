@@ -28,7 +28,7 @@ _RING_RADIUS = 40
 _RING_CIRCUMFERENCE = 2 * math.pi * _RING_RADIUS
 
 
-def _stats_json() -> dict:
+async def _stats_json() -> dict:
     """Collect all dashboard data as a dict."""
     active = browser_manager.active_pages
     max_conc = browser_manager.total_capacity
@@ -45,7 +45,7 @@ def _stats_json() -> dict:
             "/render": _ep_dict(stats.render),
             "/screenshot": _ep_dict(stats.screenshot),
         },
-        "workers": browser_manager.worker_stats(),
+        "workers": await browser_manager.worker_stats(),
     }
 
 
@@ -105,9 +105,9 @@ def _capacity_ring(active: int, max_conc: int, utilization: float) -> str:
     </svg>"""
 
 
-def _build_html() -> str:
+async def _build_html() -> str:
     """Build the dashboard HTML."""
-    d = _stats_json()
+    d = await _stats_json()
     browser_label = "alive" if d["browser_alive"] else "dead"
     dot_cls = "dot-on" if d["browser_alive"] else "dot-off"
     fail_cls = "c-err" if d["total_failures"] > 0 else "c-ok"
@@ -590,7 +590,7 @@ def register(app: App) -> None:
     @app.get("/")
     async def dashboard(request: Request) -> Response:
         return Response(
-            body=_build_html(),
+            body=await _build_html(),
             status_code=200,
             content_type="text/html; charset=utf-8",
         )
@@ -598,7 +598,7 @@ def register(app: App) -> None:
     @app.get("/stats")
     async def stats_api(request: Request) -> Response:
         return Response(
-            body=json.dumps(_stats_json()),
+            body=json.dumps(await _stats_json()),
             status_code=200,
             content_type="application/json",
             headers={"Cache-Control": "no-store"},

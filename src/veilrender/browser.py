@@ -13,6 +13,7 @@ import subprocess
 import urllib.request
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Any
 
 from cloakbrowser import ensure_binary, get_default_stealth_args
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
@@ -25,10 +26,21 @@ logger = logging.getLogger(__name__)
 CDP_PORT = 9222
 
 
-def _fetch_json(url: str, timeout: int = 2) -> dict:
+def _fetch_json(url: str, timeout: int = 2) -> Any:
     """Fetch and parse JSON from a URL (blocking)."""
     resp = urllib.request.urlopen(url, timeout=timeout)
     return json.loads(resp.read())
+
+
+def _count_cdp_pages(http_base: str, timeout: int = 2) -> int:
+    """Count open page targets via CDP /json endpoint."""
+    try:
+        targets = _fetch_json(f"{http_base}/json", timeout)
+        if isinstance(targets, list):
+            return sum(1 for t in targets if t.get("type") == "page")
+    except Exception:
+        pass
+    return -1
 
 
 def _ws_to_http(endpoint: str) -> str:
@@ -106,6 +118,10 @@ class _BaseWorker:
     @property
     def available(self) -> int:
         return self._semaphore._value
+
+    async def browser_page_count(self) -> int:
+        """Query actual open page count from the browser via CDP."""
+        return -1
 
     @asynccontextmanager
     async def get_page(
@@ -247,6 +263,11 @@ class LocalWorker(_BaseWorker):
             logger.debug("Failed to get CDP WebSocket URL", exc_info=True)
         return f"ws://127.0.0.1:{self.cdp_port}"
 
+    async def browser_page_count(self) -> int:
+        return await asyncio.to_thread(
+            _count_cdp_pages, f"http://127.0.0.1:{self.cdp_port}"
+        )
+
     @property
     def is_alive(self) -> bool:
         return self._browser is not None and self._browser.is_connected()
@@ -271,8 +292,12 @@ class RemoteWorker(_BaseWorker):
         self._playwright = await async_playwright().start()
         resolved = _resolve_to_ip(self.endpoint)
         self._browser = await self._playwright.chromium.connect_over_cdp(resolved)
+        ctx = await self._browser.new_context()
+        page = await ctx.new_page()
+        await page.close()
+        await ctx.close()
         self.healthy = True
-        logger.info("Connected to remote browser at %s", self.endpoint)
+        logger.info("Connected to remote browser at %s (verified)", self.endpoint)
 
     async def stop(self) -> None:
         self.healthy = False
@@ -297,11 +322,15 @@ class RemoteWorker(_BaseWorker):
             assert self._browser is not None
             return self._browser
 
+    def _http_base(self) -> str:
+        return _ws_to_http(_resolve_to_ip(self.endpoint))
+
     async def get_cdp_url(self) -> str | None:
         await self.ensure_ready()
-        http_endpoint = _ws_to_http(_resolve_to_ip(self.endpoint))
         try:
-            data = await asyncio.to_thread(_fetch_json, f"{http_endpoint}/json/version")
+            data = await asyncio.to_thread(
+                _fetch_json, f"{self._http_base()}/json/version"
+            )
             ws_url = data.get("webSocketDebuggerUrl")
             if ws_url:
                 return ws_url
@@ -310,6 +339,9 @@ class RemoteWorker(_BaseWorker):
         if self.endpoint.startswith(("ws://", "wss://")):
             return self.endpoint
         return None
+
+    async def browser_page_count(self) -> int:
+        return await asyncio.to_thread(_count_cdp_pages, self._http_base())
 
     @property
     def is_alive(self) -> bool:
@@ -414,15 +446,17 @@ class BrowserManager:
     def total_capacity(self) -> int:
         return sum(w.max_concurrent for w in self._workers if w.healthy)
 
-    def worker_stats(self) -> list[dict]:
+    async def worker_stats(self) -> list[dict]:
         result = []
         for i, w in enumerate(self._workers):
+            browser_pages = await w.browser_page_count() if w.healthy else -1
             result.append(
                 {
                     "index": i,
                     "endpoint": w.endpoint,
                     "healthy": w.healthy,
                     "active": w.active,
+                    "browser_pages": browser_pages,
                     "max_concurrent": w.max_concurrent,
                     "is_alive": w.is_alive,
                 }
