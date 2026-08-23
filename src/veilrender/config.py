@@ -5,6 +5,24 @@ from __future__ import annotations
 import os
 
 
+def _parse_worker_entry(entry: str) -> tuple[str, str]:
+    """Parse a worker entry into (protocol, endpoint).
+
+    Supported formats:
+    - ``cdp://host:9222`` → ("cdp", "http://host:9222")
+    - ``playwright://host:1234/path`` → ("playwright", "ws://host:1234/path")
+    - ``http://host:9222`` → ("cdp", "http://host:9222")
+    - ``host:9222`` → ("cdp", "http://host:9222")
+    """
+    if entry.startswith("playwright://"):
+        return ("playwright", "ws://" + entry[len("playwright://") :])
+    if entry.startswith("cdp://"):
+        return ("cdp", "http://" + entry[len("cdp://") :])
+    if entry.startswith(("http://", "https://", "ws://", "wss://")):
+        return ("cdp", entry)
+    return ("cdp", "http://" + entry)
+
+
 class Settings:
     """Configuration from ``VEILRENDER_*`` environment variables."""
 
@@ -22,9 +40,15 @@ class Settings:
         self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "5"))
 
         # Remote browser worker pool
+        # Format: cdp://host:9222,playwright://host:1234/ws-path
+        # No prefix or http:// defaults to cdp://
         _workers_raw = os.environ.get("VEILRENDER_WORKERS", "")
-        self.workers: list[str] = (
-            [w.strip() for w in _workers_raw.split(",") if w.strip()]
+        self.workers: list[tuple[str, str]] = (
+            [
+                _parse_worker_entry(w.strip())
+                for w in _workers_raw.split(",")
+                if w.strip()
+            ]
             if _workers_raw
             else []
         )
