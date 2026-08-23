@@ -102,13 +102,24 @@ def main() -> None:
 
                 # Check if this is a WebSocket upgrade to /cdp
                 if is_websocket_upgrade(method, headers, path):
+                    worker_idx: int | None = None
+                    for part in query_string.split("&"):
+                        if part.startswith("worker="):
+                            try:
+                                worker_idx = int(part.split("=", 1)[1])
+                            except ValueError:
+                                pass
+
+                    async def _get_cdp_url() -> str | None:
+                        return await browser_manager.get_cdp_url(worker_idx)
+
                     await handle_cdp_upgrade(
                         reader,
                         writer,
                         headers,
                         path,
                         query_string,
-                        browser_manager.get_cdp_url,
+                        _get_cdp_url,
                     )
                     return
 

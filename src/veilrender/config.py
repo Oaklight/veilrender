@@ -20,6 +20,21 @@ class Settings:
             os.environ.get("VEILRENDER_VIEWPORT_HEIGHT", "720")
         )
         self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "5"))
+
+        # Remote browser worker pool
+        _workers_raw = os.environ.get("VEILRENDER_WORKERS", "")
+        self.workers: list[str] = (
+            [w.strip() for w in _workers_raw.split(",") if w.strip()]
+            if _workers_raw
+            else []
+        )
+        self.worker_max_concurrent: int = int(
+            os.environ.get("VEILRENDER_WORKER_MAX_CONCURRENT", str(self.max_concurrent))
+        )
+        self.worker_health_interval: int = int(
+            os.environ.get("VEILRENDER_WORKER_HEALTH_INTERVAL", "10")
+        )
+
         self.resource_filter: bool = (
             os.environ.get("VEILRENDER_RESOURCE_FILTER", "true").lower() == "true"
         )

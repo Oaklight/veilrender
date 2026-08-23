@@ -8,7 +8,6 @@ import math
 from veilrender import stats
 from veilrender._vendor.httpserver import App, Request, Response
 from veilrender.browser import browser_manager
-from veilrender.config import settings
 
 _BADGE_STYLE = "style=flat&amp;labelColor=1a1d1d&amp;color=2d3d32"
 
@@ -32,7 +31,7 @@ _RING_CIRCUMFERENCE = 2 * math.pi * _RING_RADIUS
 def _stats_json() -> dict:
     """Collect all dashboard data as a dict."""
     active = browser_manager.active_pages
-    max_conc = settings.max_concurrent
+    max_conc = browser_manager.total_capacity
     return {
         "browser_alive": browser_manager.is_browser_alive,
         "uptime": stats.format_uptime(),
@@ -46,6 +45,7 @@ def _stats_json() -> dict:
             "/render": _ep_dict(stats.render),
             "/screenshot": _ep_dict(stats.screenshot),
         },
+        "workers": browser_manager.worker_stats(),
     }
 
 
