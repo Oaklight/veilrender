@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prometheus metrics endpoint at `GET /metrics` — zero-dependency exposition format with uptime, browser status, active pages, request counters, cache lookups, and latency summaries (p50/p95) ([#23])
+- Dashboard i18n: language selector dropdown (en/zh) with localStorage persistence; extensible via dict — adding a language only requires a new entry ([#22])
+- Dashboard `GET /stats` JSON API for live data polling ([#22])
+- SVG ring gauge for capacity visualization on dashboard ([#22])
+- Author credit and badges in dashboard footer ([#22])
+
+### Changed
+
+- Dashboard redesign: dark theme inspired by modal.com — pure black background, mint-green accents, DM Sans + JetBrains Mono typography ([#22])
+- Dashboard data refresh: replaced `<meta http-equiv="refresh">` full-page reload with fetch-based polling — no more flashing or scroll reset ([#22])
+- Dashboard shows stale-data indicator (dims) after 3 consecutive fetch failures ([#22])
+- Dashboard pauses polling on hidden tab via Page Visibility API ([#22])
+- Shields.io badges use unified dark-green theme colors ([#22])
+- Vendored modules: replace deprecated `jsonc` with `jsonx`, remove `benchmark_compare` ([#22])
+- Bump vendored config 0.3.0→0.3.1, httpserver 0.1.0→0.2.1, readability 0.1.0→0.2.0
+
+### Removed
+
+- HF Spaces badge (space was taken down) ([#22])
+
 ## [0.3.1] - 2026-07-04
 
 ### Added
@@ -110,3 +132,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#17]: https://github.com/Oaklight/veilrender/pull/17
 [#20]: https://github.com/Oaklight/veilrender/pull/20
 [#21]: https://github.com/Oaklight/veilrender/pull/21
+[#22]: https://github.com/Oaklight/veilrender/pull/22
+[#23]: https://github.com/Oaklight/veilrender/pull/23
