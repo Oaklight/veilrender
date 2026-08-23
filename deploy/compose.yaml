@@ -1,0 +1,20 @@
+# Single-instance mode: VeilRender with embedded CloakBrowser
+services:
+  veilrender:
+    image: oaklight/veilrender:latest
+    container_name: veilrender
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    environment:
+      - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:?Set VEILRENDER_API_TOKEN}
+      - VEILRENDER_RESOURCE_FILTER=true
+    volumes:
+      - veilrender-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+volumes:
+  veilrender-data:

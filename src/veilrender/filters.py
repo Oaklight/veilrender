@@ -13,7 +13,7 @@ import importlib.resources
 import logging
 from urllib.parse import urlparse
 
-from playwright.async_api import Route
+from patchright.async_api import Route
 
 logger = logging.getLogger(__name__)
 

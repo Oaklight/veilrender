@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from cloakbrowser import ensure_binary, get_default_stealth_args
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+from patchright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from veilrender.config import settings
 from veilrender.filters import load_blocklist, make_route_handler

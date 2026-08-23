@@ -53,6 +53,8 @@ DEVTEST_STACK ?= /dockervol/dockge/stacks/veilrender
 
 # Build dev-test image, push to remote VPS, restart container.
 # Usage: make deploy-dev SSH_TARGET=cloud.usa2
+#        make deploy-dev SSH_TARGET=cloud.usa2 POOL=1   (gateway + worker)
+POOL ?=
 deploy-dev:
 ifndef SSH_TARGET
 	$(error SSH_TARGET is required. Usage: make deploy-dev SSH_TARGET=cloud.usa2)
@@ -63,15 +65,22 @@ endif
 	echo "==> Building Docker image ($$DEV_VER)..."; \
 	docker build -t $(DOCKER_IMAGE):dev-test -q .; \
 	echo "==> Deploying to $(SSH_TARGET) via zstd..."; \
+	if [ -n "$(POOL)" ]; then \
+		COMPOSE_SRC="deploy/compose-pool.yaml"; \
+	else \
+		COMPOSE_SRC="deploy/compose.yaml"; \
+	fi; \
 	docker save $(DOCKER_IMAGE):dev-test | zstd -3 | ssh $(SSH_TARGET) \
-		'zstd -d | docker load && \
-		 cd $(DEVTEST_STACK) && \
-		 sed -i "s|image:.*|image: $(DOCKER_IMAGE):dev-test|" compose.yaml && \
+		'zstd -d | docker load'; \
+	scp $$COMPOSE_SRC $(SSH_TARGET):$(DEVTEST_STACK)/compose.yaml; \
+	ssh $(SSH_TARGET) \
+		'cd $(DEVTEST_STACK) && \
+		 sed -i "s|image: oaklight/veilrender:.*|image: $(DOCKER_IMAGE):dev-test|" compose.yaml && \
 		 docker compose up -d --force-recreate && \
 		 sleep 5 && \
 		 echo "=== Health check ===" && \
 		 curl -sS -o /dev/null -w "%{http_code} /health\n" http://127.0.0.1:7860/ || true'; \
-	echo "==> VPS dev-test deployed successfully ($$DEV_VER)."
+	echo "==> VPS dev-test deployed successfully ($$DEV_VER, $${COMPOSE_SRC})."
 
 # Deploy to Hugging Face Spaces by pushing current code.
 # Usage: make deploy-hf HF_SPACE=oaklight/veilrender
@@ -116,9 +125,11 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  SSH_TARGET=<host>     - SSH target for deploy-dev (required)"
+	@echo "  POOL=1                - Use pool mode (gateway + CloakBrowser workers)"
 	@echo "  HF_SPACE=<user/repo> - HF Space for deploy-hf (required)"
 	@echo "  HF_TOKEN             - HF token (env var, required for deploy-hf)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make deploy-dev SSH_TARGET=cloud.usa2"
+	@echo "  make deploy-dev SSH_TARGET=cloud.usa2 POOL=1"
 	@echo "  make deploy-hf HF_SPACE=oaklight/veilrender"

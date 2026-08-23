@@ -29,7 +29,7 @@ RUN useradd -m -u 1000 user || true
 
 WORKDIR /app
 
-# Install Python package (includes cloakbrowser + playwright)
+# Install Python package (includes cloakbrowser + patchright)
 COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
@@ -37,6 +37,8 @@ RUN pip install --no-cache-dir .
 # Pre-download CloakBrowser Chromium binary as runtime user
 USER 1000
 RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
+# Install Patchright's Chromium driver
+RUN patchright install chromium
 EXPOSE 7860
 
 CMD ["python", "-m", "veilrender"]
