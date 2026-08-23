@@ -25,6 +25,21 @@ logger = logging.getLogger(__name__)
 CDP_PORT = 9222
 
 
+def _fetch_json(url: str, timeout: int = 2) -> dict:
+    """Fetch and parse JSON from a URL (blocking)."""
+    resp = urllib.request.urlopen(url, timeout=timeout)
+    return json.loads(resp.read())
+
+
+def _ws_to_http(endpoint: str) -> str:
+    """Convert a ws(s):// URL to http(s):// for CDP HTTP API."""
+    if endpoint.startswith("wss://"):
+        return "https://" + endpoint[6:]
+    if endpoint.startswith("ws://"):
+        return "http://" + endpoint[5:]
+    return endpoint
+
+
 # ---------------------------------------------------------------------------
 # Worker base interface
 # ---------------------------------------------------------------------------
@@ -193,10 +208,10 @@ class LocalWorker(_BaseWorker):
     async def get_cdp_url(self) -> str | None:
         await self.ensure_ready()
         try:
-            resp = urllib.request.urlopen(
-                f"http://127.0.0.1:{self.cdp_port}/json/version", timeout=2
+            data = await asyncio.to_thread(
+                _fetch_json,
+                f"http://127.0.0.1:{self.cdp_port}/json/version",
             )
-            data = json.loads(resp.read())
             ws_url = data.get("webSocketDebuggerUrl")
             if ws_url:
                 return ws_url
@@ -255,16 +270,17 @@ class RemoteWorker(_BaseWorker):
 
     async def get_cdp_url(self) -> str | None:
         await self.ensure_ready()
-        http_endpoint = self.endpoint.replace("ws://", "http://", 1)
+        http_endpoint = _ws_to_http(self.endpoint)
         try:
-            resp = urllib.request.urlopen(f"{http_endpoint}/json/version", timeout=2)
-            data = json.loads(resp.read())
+            data = await asyncio.to_thread(_fetch_json, f"{http_endpoint}/json/version")
             ws_url = data.get("webSocketDebuggerUrl")
             if ws_url:
                 return ws_url
         except Exception:
             logger.debug("Failed to get CDP URL for %s", self.endpoint, exc_info=True)
-        return self.endpoint if self.endpoint.startswith("ws://") else None
+        if self.endpoint.startswith(("ws://", "wss://")):
+            return self.endpoint
+        return None
 
     @property
     def is_alive(self) -> bool:
@@ -311,12 +327,19 @@ class BrowserManager:
             except Exception:
                 logger.error("Failed to start worker %s", w.endpoint, exc_info=True)
                 w.healthy = False
+        healthy_count = sum(1 for w in self._workers if w.healthy)
+        if healthy_count == 0:
+            logger.warning("0 of %d workers healthy at startup", len(self._workers))
         if not self._is_local:
             self._health_task = asyncio.create_task(self._health_loop())
 
     async def stop(self) -> None:
         if self._health_task:
             self._health_task.cancel()
+            try:
+                await self._health_task
+            except asyncio.CancelledError:
+                pass
             self._health_task = None
         for w in self._workers:
             await w.stop()
@@ -335,8 +358,7 @@ class BrowserManager:
                     elif not alive and not w.healthy:
                         logger.info("Attempting reconnect to %s", w.endpoint)
                         try:
-                            await w.stop()
-                            await w.start()
+                            await w.ensure_ready()
                         except Exception:
                             logger.debug("Reconnect failed for %s", w.endpoint)
                     elif alive and not w.healthy:
