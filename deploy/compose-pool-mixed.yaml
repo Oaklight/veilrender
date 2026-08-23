@@ -1,0 +1,53 @@
+# Mixed pool: VeilRender gateway + CloakBrowser (Chromium) + Camoufox (Firefox)
+#
+# Usage:
+#   docker compose -f deploy/compose-pool-mixed.yaml up -d
+#
+# This gives dual-engine stealth coverage:
+#   - CloakBrowser: stealth Chromium (CDP) via Patchright
+#   - Camoufox: stealth Firefox (Playwright protocol)
+
+services:
+  veilrender:
+    image: oaklight/veilrender:gateway
+    container_name: veilrender
+    restart: unless-stopped
+    ports:
+      - "7860:7860"
+    environment:
+      - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
+      - VEILRENDER_RESOURCE_FILTER=true
+      - VEILRENDER_WORKERS=cdp://chromium-worker:9222,playwright://camoufox-worker:1234/ws
+      - VEILRENDER_WORKER_MAX_CONCURRENT=${VEILRENDER_WORKER_MAX_CONCURRENT:-5}
+      - VEILRENDER_WORKER_HEALTH_INTERVAL=${VEILRENDER_WORKER_HEALTH_INTERVAL:-10}
+    volumes:
+      - veilrender-data:/data
+    depends_on:
+      - chromium-worker
+      - camoufox-worker
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  chromium-worker:
+    image: cloakhq/cloakbrowser
+    restart: unless-stopped
+    command: ["cloakserve"]
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  camoufox-worker:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.camoufox
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+volumes:
+  veilrender-data:

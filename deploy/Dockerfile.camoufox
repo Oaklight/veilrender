@@ -1,0 +1,31 @@
+# Camoufox server — stealth Firefox browser with Playwright endpoint
+#
+# Exposes a Playwright WebSocket endpoint for VeilRender gateway.
+# Usage: docker build -f deploy/Dockerfile.camoufox -t veilrender-camoufox .
+#        docker run -p 1234:1234 veilrender-camoufox
+#
+# Connect from VeilRender:
+#   VEILRENDER_WORKERS=playwright://camoufox:1234/ws
+
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgtk-3-0 \
+        libdbus-glib-1-2 \
+        libxt6 \
+        libasound2t64 \
+        libx11-xcb1 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxrandr2 \
+        fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "camoufox[geoip]"
+RUN python -m camoufox fetch
+
+RUN useradd -m -u 1000 user || true
+USER 1000
+
+EXPOSE 1234
+CMD ["python", "-m", "camoufox", "server", "--headless", "--port", "1234", "--ws-path", "ws"]

@@ -1,7 +1,7 @@
-"""Playwright browser lifecycle management.
+"""Browser lifecycle management.
 
-Supports a single local browser (default) or a pool of remote CDP
-workers when ``VEILRENDER_WORKERS`` is configured.
+Supports a single local browser (default) or a pool of remote workers
+via CDP (Chromium) or Playwright protocol (Firefox/Camoufox).
 """
 
 from __future__ import annotations
@@ -460,6 +460,70 @@ class RemoteWorker(_BaseWorker):
 
 
 # ---------------------------------------------------------------------------
+# Playwright-protocol worker — for Firefox/Camoufox
+# ---------------------------------------------------------------------------
+
+
+class PlaywrightWorker(_BaseWorker):
+    """Browser worker connected via Playwright protocol (Firefox/Camoufox)."""
+
+    def __init__(self, endpoint: str, max_concurrent: int) -> None:
+        super().__init__(max_concurrent)
+        self.endpoint = endpoint
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.firefox.connect(self.endpoint)
+        ctx = await self._browser.new_context()
+        page = await ctx.new_page()
+        await page.close()
+        await ctx.close()
+        self.healthy = True
+        logger.info(
+            "Connected to Playwright/Firefox browser at %s (verified)", self.endpoint
+        )
+
+    async def stop(self) -> None:
+        self.healthy = False
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+
+    async def ensure_ready(self) -> Browser:
+        async with self._lock:
+            if self._browser is None or not self._browser.is_connected():
+                logger.warning(
+                    "Playwright browser %s disconnected, reconnecting...",
+                    self.endpoint,
+                )
+                await self.stop()
+                await self.start()
+            assert self._browser is not None
+            return self._browser
+
+    async def get_cdp_url(self) -> str | None:
+        return None
+
+    async def browser_page_count(self) -> int:
+        if self._browser and self._browser.is_connected():
+            return sum(len(c.pages) for c in self._browser.contexts)
+        return -1
+
+    @property
+    def is_alive(self) -> bool:
+        return self._browser is not None and self._browser.is_connected()
+
+
+# ---------------------------------------------------------------------------
 # BrowserManager — pool coordinator
 # ---------------------------------------------------------------------------
 
@@ -469,15 +533,21 @@ class BrowserManager:
 
     When ``VEILRENDER_WORKERS`` is not set, spawns a single local
     Chromium process (identical to pre-pool behavior). When set,
-    connects to remote CDP endpoints and distributes load.
+    connects to remote workers via CDP or Playwright protocol.
     """
 
     def __init__(self) -> None:
         if settings.workers:
-            self._workers: list[_BaseWorker] = [
-                RemoteWorker(url, settings.worker_max_concurrent)
-                for url in settings.workers
-            ]
+            self._workers: list[_BaseWorker] = []
+            for protocol, endpoint in settings.workers:
+                if protocol == "playwright":
+                    self._workers.append(
+                        PlaywrightWorker(endpoint, settings.worker_max_concurrent)
+                    )
+                else:
+                    self._workers.append(
+                        RemoteWorker(endpoint, settings.worker_max_concurrent)
+                    )
             self._is_local = False
         else:
             self._workers = [LocalWorker(CDP_PORT, settings.max_concurrent)]
