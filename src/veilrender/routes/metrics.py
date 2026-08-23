@@ -5,7 +5,6 @@ from __future__ import annotations
 from veilrender import stats
 from veilrender._vendor.httpserver import App, Request, Response
 from veilrender.browser import browser_manager
-from veilrender.config import settings
 
 _CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 _ENDPOINTS = (("/render", stats.render), ("/screenshot", stats.screenshot))
@@ -36,8 +35,33 @@ def _build_metrics() -> str:
     parts.append(
         "# HELP veilrender_max_concurrent Maximum concurrent page slots.\n"
         "# TYPE veilrender_max_concurrent gauge\n"
-        f"veilrender_max_concurrent {settings.max_concurrent}\n"
+        f"veilrender_max_concurrent {browser_manager.total_capacity}\n"
     )
+
+    # Per-worker gauges
+    workers = browser_manager.worker_stats()
+    if len(workers) > 1 or (workers and workers[0]["endpoint"] != "local"):
+        lines = [
+            "# HELP veilrender_worker_healthy Whether a worker is healthy.\n",
+            "# TYPE veilrender_worker_healthy gauge\n",
+        ]
+        for ws in workers:
+            lines.append(
+                f'veilrender_worker_healthy{{worker="{ws["index"]}",endpoint="{ws["endpoint"]}"}} '
+                f"{1 if ws['healthy'] else 0}\n"
+            )
+        parts.append("".join(lines))
+
+        lines = [
+            "# HELP veilrender_worker_active_pages Active pages per worker.\n",
+            "# TYPE veilrender_worker_active_pages gauge\n",
+        ]
+        for ws in workers:
+            lines.append(
+                f'veilrender_worker_active_pages{{worker="{ws["index"]}",endpoint="{ws["endpoint"]}"}} '
+                f"{ws['active']}\n"
+            )
+        parts.append("".join(lines))
 
     # Counters — requests
     lines = [

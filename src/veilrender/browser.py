@@ -1,12 +1,18 @@
-"""Playwright browser lifecycle management."""
+"""Playwright browser lifecycle management.
+
+Supports a single local browser (default) or a pool of remote CDP
+workers when ``VEILRENDER_WORKERS`` is configured.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
+import urllib.request
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from collections.abc import AsyncIterator
 
 from cloakbrowser import ensure_binary, get_default_stealth_args
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
@@ -19,39 +25,98 @@ logger = logging.getLogger(__name__)
 CDP_PORT = 9222
 
 
-class BrowserManager:
-    """Manages a shared Playwright browser instance.
+# ---------------------------------------------------------------------------
+# Worker base interface
+# ---------------------------------------------------------------------------
 
-    Launches Chromium directly (not via Playwright's launch()) so that
-    ``--remote-debugging-port`` actually takes effect. Playwright then
-    connects over CDP, and the CDP port is also available for external
-    clients via the WebSocket proxy.
-    """
 
-    def __init__(self) -> None:
+class _BaseWorker:
+    """Common interface for local and remote browser workers."""
+
+    endpoint: str = "unknown"
+
+    def __init__(self, max_concurrent: int) -> None:
+        self.max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self.healthy = False
+
+    async def start(self) -> None:
+        raise NotImplementedError
+
+    async def stop(self) -> None:
+        raise NotImplementedError
+
+    async def ensure_ready(self) -> Browser:
+        raise NotImplementedError
+
+    async def get_cdp_url(self) -> str | None:
+        raise NotImplementedError
+
+    @property
+    def is_alive(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def active(self) -> int:
+        return self.max_concurrent - self._semaphore._value
+
+    @property
+    def available(self) -> int:
+        return self._semaphore._value
+
+    @asynccontextmanager
+    async def get_page(
+        self,
+        *,
+        viewport_width: int | None = None,
+        viewport_height: int | None = None,
+        route_handler: Callable | None = None,
+    ) -> AsyncIterator[tuple[BrowserContext, Page]]:
+        async with self._semaphore:
+            browser = await self.ensure_ready()
+            context: BrowserContext | None = None
+            try:
+                context = await browser.new_context(
+                    viewport={
+                        "width": viewport_width or settings.viewport_width,
+                        "height": viewport_height or settings.viewport_height,
+                    },
+                    user_agent=None,
+                )
+                page = await context.new_page()
+                if route_handler:
+                    await page.route("**/*", route_handler)
+                yield context, page
+            finally:
+                if context:
+                    await context.close()
+
+
+# ---------------------------------------------------------------------------
+# Local worker — spawns a Chromium process on this machine
+# ---------------------------------------------------------------------------
+
+
+class LocalWorker(_BaseWorker):
+    """Browser worker backed by a local Chromium process."""
+
+    def __init__(self, cdp_port: int, max_concurrent: int) -> None:
+        super().__init__(max_concurrent)
+        self.cdp_port = cdp_port
+        self.endpoint = "local"
         self._playwright = None
         self._browser: Browser | None = None
         self._chrome_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
-        self._semaphore = asyncio.Semaphore(settings.max_concurrent)
         self._lock = asyncio.Lock()
 
-        # Load blocklist once at init if resource filtering is enabled
-        if settings.resource_filter:
-            self._blocklist = load_blocklist(settings.blocked_domains_extra)
-            self._route_handler = make_route_handler(self._blocklist)
-        else:
-            self._blocklist = frozenset()
-            self._route_handler = None
-
     async def start(self) -> None:
-        """Launch Chromium with CDP and connect Playwright to it."""
         executable_path = ensure_binary()
         stealth_args = get_default_stealth_args()
 
         chrome_args = [
             executable_path,
             "--headless",
-            f"--remote-debugging-port={CDP_PORT}",
+            f"--remote-debugging-port={self.cdp_port}",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-setuid-sandbox",
@@ -67,12 +132,9 @@ class BrowserManager:
             stderr=subprocess.PIPE,
         )
 
-        # Wait for CDP to be ready
-        cdp_url = f"http://127.0.0.1:{CDP_PORT}"
-        for attempt in range(30):
+        cdp_url = f"http://127.0.0.1:{self.cdp_port}"
+        for _ in range(30):
             try:
-                import urllib.request
-
                 urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1)
                 break
             except Exception:
@@ -87,35 +149,17 @@ class BrowserManager:
                 f"Chromium CDP not ready after 15s. stderr: {stderr[:500]}"
             )
 
-        # Connect Playwright over CDP
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.connect_over_cdp(
-            f"http://127.0.0.1:{CDP_PORT}"
-        )
+        self._browser = await self._playwright.chromium.connect_over_cdp(cdp_url)
+        self.healthy = True
         logger.info(
-            "Browser started (CloakBrowser %s, CDP on :%d)", executable_path, CDP_PORT
+            "Local browser started (CloakBrowser %s, CDP on :%d)",
+            executable_path,
+            self.cdp_port,
         )
-
-    async def get_cdp_url(self) -> str | None:
-        """Return the internal CDP WebSocket URL, or None if unavailable."""
-        await self._ensure_browser()
-        try:
-            import urllib.request
-            import json
-
-            resp = urllib.request.urlopen(
-                f"http://127.0.0.1:{CDP_PORT}/json/version", timeout=2
-            )
-            data = json.loads(resp.read())
-            ws_url = data.get("webSocketDebuggerUrl")
-            if ws_url:
-                return ws_url
-        except Exception:
-            logger.debug("Failed to get CDP WebSocket URL", exc_info=True)
-        return f"ws://127.0.0.1:{CDP_PORT}"
 
     async def stop(self) -> None:
-        """Close the browser, Playwright, and Chromium process."""
+        self.healthy = False
         if self._browser:
             try:
                 await self._browser.close()
@@ -132,31 +176,219 @@ class BrowserManager:
             except subprocess.TimeoutExpired:
                 self._chrome_proc.kill()
             self._chrome_proc = None
-        logger.info("Browser stopped")
 
-    async def _ensure_browser(self) -> Browser:
-        """Restart browser if it crashed."""
+    async def ensure_ready(self) -> Browser:
         async with self._lock:
             chrome_dead = (
                 self._chrome_proc is None or self._chrome_proc.poll() is not None
             )
             browser_dead = self._browser is None or not self._browser.is_connected()
             if chrome_dead or browser_dead:
-                logger.warning("Browser not connected, restarting...")
+                logger.warning("Local browser not connected, restarting...")
                 await self.stop()
                 await self.start()
             assert self._browser is not None
             return self._browser
 
+    async def get_cdp_url(self) -> str | None:
+        await self.ensure_ready()
+        try:
+            resp = urllib.request.urlopen(
+                f"http://127.0.0.1:{self.cdp_port}/json/version", timeout=2
+            )
+            data = json.loads(resp.read())
+            ws_url = data.get("webSocketDebuggerUrl")
+            if ws_url:
+                return ws_url
+        except Exception:
+            logger.debug("Failed to get CDP WebSocket URL", exc_info=True)
+        return f"ws://127.0.0.1:{self.cdp_port}"
+
+    @property
+    def is_alive(self) -> bool:
+        return self._browser is not None and self._browser.is_connected()
+
+
+# ---------------------------------------------------------------------------
+# Remote worker — connects to an external CDP endpoint
+# ---------------------------------------------------------------------------
+
+
+class RemoteWorker(_BaseWorker):
+    """Browser worker backed by a remote CDP endpoint."""
+
+    def __init__(self, endpoint: str, max_concurrent: int) -> None:
+        super().__init__(max_concurrent)
+        self.endpoint = endpoint
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.connect_over_cdp(self.endpoint)
+        self.healthy = True
+        logger.info("Connected to remote browser at %s", self.endpoint)
+
+    async def stop(self) -> None:
+        self.healthy = False
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+
+    async def ensure_ready(self) -> Browser:
+        async with self._lock:
+            if self._browser is None or not self._browser.is_connected():
+                logger.warning(
+                    "Remote browser %s disconnected, reconnecting...", self.endpoint
+                )
+                await self.stop()
+                await self.start()
+            assert self._browser is not None
+            return self._browser
+
+    async def get_cdp_url(self) -> str | None:
+        await self.ensure_ready()
+        http_endpoint = self.endpoint.replace("ws://", "http://", 1)
+        try:
+            resp = urllib.request.urlopen(f"{http_endpoint}/json/version", timeout=2)
+            data = json.loads(resp.read())
+            ws_url = data.get("webSocketDebuggerUrl")
+            if ws_url:
+                return ws_url
+        except Exception:
+            logger.debug("Failed to get CDP URL for %s", self.endpoint, exc_info=True)
+        return self.endpoint if self.endpoint.startswith("ws://") else None
+
+    @property
+    def is_alive(self) -> bool:
+        return self._browser is not None and self._browser.is_connected()
+
+
+# ---------------------------------------------------------------------------
+# BrowserManager — pool coordinator
+# ---------------------------------------------------------------------------
+
+
+class BrowserManager:
+    """Manages browser workers — local or remote pool.
+
+    When ``VEILRENDER_WORKERS`` is not set, spawns a single local
+    Chromium process (identical to pre-pool behavior). When set,
+    connects to remote CDP endpoints and distributes load.
+    """
+
+    def __init__(self) -> None:
+        if settings.workers:
+            self._workers: list[_BaseWorker] = [
+                RemoteWorker(url, settings.worker_max_concurrent)
+                for url in settings.workers
+            ]
+            self._is_local = False
+        else:
+            self._workers = [LocalWorker(CDP_PORT, settings.max_concurrent)]
+            self._is_local = True
+
+        self._health_task: asyncio.Task | None = None  # type: ignore[type-arg]
+
+        if settings.resource_filter:
+            self._blocklist = load_blocklist(settings.blocked_domains_extra)
+            self._route_handler = make_route_handler(self._blocklist)
+        else:
+            self._blocklist = frozenset()
+            self._route_handler = None
+
+    async def start(self) -> None:
+        for w in self._workers:
+            try:
+                await w.start()
+            except Exception:
+                logger.error("Failed to start worker %s", w.endpoint, exc_info=True)
+                w.healthy = False
+        if not self._is_local:
+            self._health_task = asyncio.create_task(self._health_loop())
+
+    async def stop(self) -> None:
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        for w in self._workers:
+            await w.stop()
+        logger.info("Browser stopped")
+
+    async def _health_loop(self) -> None:
+        interval = settings.worker_health_interval
+        while True:
+            await asyncio.sleep(interval)
+            for w in self._workers:
+                try:
+                    alive = w.is_alive
+                    if not alive and w.healthy:
+                        logger.warning("Worker %s went unhealthy", w.endpoint)
+                        w.healthy = False
+                    elif not alive and not w.healthy:
+                        logger.info("Attempting reconnect to %s", w.endpoint)
+                        try:
+                            await w.stop()
+                            await w.start()
+                        except Exception:
+                            logger.debug("Reconnect failed for %s", w.endpoint)
+                    elif alive and not w.healthy:
+                        w.healthy = True
+                        logger.info("Worker %s recovered", w.endpoint)
+                except Exception:
+                    logger.debug("Health check error for %s", w.endpoint, exc_info=True)
+
+    def _pick_worker(self) -> _BaseWorker:
+        healthy = [w for w in self._workers if w.healthy]
+        if not healthy:
+            raise RuntimeError("No healthy browser workers available")
+        return max(healthy, key=lambda w: w.available)
+
     @property
     def active_pages(self) -> int:
-        """Number of browser pages currently in use."""
-        return settings.max_concurrent - self._semaphore._value
+        return sum(w.active for w in self._workers)
 
     @property
     def is_browser_alive(self) -> bool:
-        """Whether the browser process is connected."""
-        return self._browser is not None and self._browser.is_connected()
+        return any(w.is_alive for w in self._workers)
+
+    @property
+    def total_capacity(self) -> int:
+        return sum(w.max_concurrent for w in self._workers if w.healthy)
+
+    def worker_stats(self) -> list[dict]:
+        result = []
+        for i, w in enumerate(self._workers):
+            result.append(
+                {
+                    "index": i,
+                    "endpoint": w.endpoint,
+                    "healthy": w.healthy,
+                    "active": w.active,
+                    "max_concurrent": w.max_concurrent,
+                    "is_alive": w.is_alive,
+                }
+            )
+        return result
+
+    async def get_cdp_url(self, worker_index: int | None = None) -> str | None:
+        if worker_index is not None and 0 <= worker_index < len(self._workers):
+            w = self._workers[worker_index]
+            if w.healthy:
+                return await w.get_cdp_url()
+            return None
+        try:
+            w = self._pick_worker()
+            return await w.get_cdp_url()
+        except RuntimeError:
+            return None
 
     @asynccontextmanager
     async def get_page(
@@ -165,29 +397,13 @@ class BrowserManager:
         viewport_width: int | None = None,
         viewport_height: int | None = None,
     ) -> AsyncIterator[tuple[BrowserContext, Page]]:
-        """Create an isolated browser context and page.
-
-        Yields:
-            A (context, page) tuple. Both are closed automatically.
-        """
-        async with self._semaphore:
-            browser = await self._ensure_browser()
-            context: BrowserContext | None = None
-            try:
-                context = await browser.new_context(
-                    viewport={
-                        "width": viewport_width or settings.viewport_width,
-                        "height": viewport_height or settings.viewport_height,
-                    },
-                    user_agent=None,  # use Playwright default
-                )
-                page = await context.new_page()
-                if self._route_handler:
-                    await page.route("**/*", self._route_handler)
-                yield context, page
-            finally:
-                if context:
-                    await context.close()
+        worker = self._pick_worker()
+        async with worker.get_page(
+            viewport_width=viewport_width,
+            viewport_height=viewport_height,
+            route_handler=self._route_handler,
+        ) as result:
+            yield result
 
 
 browser_manager = BrowserManager()
