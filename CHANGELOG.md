@@ -9,14 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Remote browser worker pool** for horizontal scaling — `VEILRENDER_WORKERS` env var routes requests to remote CDP endpoints via least-connections routing ([#25])
+- `LocalWorker` / `RemoteWorker` abstraction with shared `_BaseWorker` interface ([#25])
+- Worker health checks with automatic reconnection for remote workers ([#25])
+- CDP proxy `?worker=N` query param for targeted worker routing ([#25])
+- Per-worker Prometheus gauges: `veilrender_worker_healthy`, `veilrender_worker_active_pages`, `veilrender_worker_browser_pages` ([#25])
+- Real browser page count via CDP `/json` endpoint for accurate capacity reporting ([#25])
 - Prometheus metrics endpoint at `GET /metrics` — zero-dependency exposition format with uptime, browser status, active pages, request counters, cache lookups, and latency summaries (p50/p95) ([#23])
 - Dashboard i18n: language selector dropdown (en/zh) with localStorage persistence; extensible via dict — adding a language only requires a new entry ([#22])
 - Dashboard `GET /stats` JSON API for live data polling ([#22])
 - SVG ring gauge for capacity visualization on dashboard ([#22])
 - Author credit and badges in dashboard footer ([#22])
+- Multi-target Dockerfile: `gateway` (336MB, no browser) and `full` (1.07GB, CloakBrowser embedded)
+- `deploy/compose.yaml` (single-instance) and `deploy/compose-pool.yaml` (gateway + `cloakhq/cloakbrowser` workers)
+- `POOL=1` flag for `make deploy-dev` to deploy in pool mode
+- `CLOAKBROWSER_MIRROR` env var for China downloads (e.g. `https://ghfast.top`)
+- `CLOAKBROWSER_BINARY` env var to use a custom browser binary path
+- Auto-download CloakBrowser binary from GitHub Releases without pip package
+- `scripts/download-cloakbrowser.py` for standalone binary download
 
 ### Changed
 
+- **Migrate from Playwright to Patchright** — drop-in replacement with stealth driver patches for Chromium ([#25])
+- Remove `cloakbrowser` pip dependency — binary downloaded directly from GitHub Releases, stealth args generated inline
+- Docker image size: full 1.43GB → 1.07GB, gateway 498MB → 336MB (removed playwright transitive dep + multi-stage libgbm extraction)
 - Dashboard redesign: dark theme inspired by modal.com — pure black background, mint-green accents, DM Sans + JetBrains Mono typography ([#22])
 - Dashboard data refresh: replaced `<meta http-equiv="refresh">` full-page reload with fetch-based polling — no more flashing or scroll reset ([#22])
 - Dashboard shows stale-data indicator (dims) after 3 consecutive fetch failures ([#22])
@@ -24,10 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shields.io badges use unified dark-green theme colors ([#22])
 - Vendored modules: replace deprecated `jsonc` with `jsonx`, remove `benchmark_compare` ([#22])
 - Bump vendored config 0.3.0→0.3.1, httpserver 0.1.0→0.2.1, readability 0.1.0→0.2.0
+- New config: `VEILRENDER_WORKERS`, `VEILRENDER_WORKER_MAX_CONCURRENT`, `VEILRENDER_WORKER_HEALTH_INTERVAL` ([#25])
 
 ### Removed
 
 - HF Spaces badge (space was taken down) ([#22])
+- `cloakbrowser` pip dependency (binary auto-downloaded instead)
 
 ## [0.3.1] - 2026-07-04
 
@@ -134,3 +152,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#21]: https://github.com/Oaklight/veilrender/pull/21
 [#22]: https://github.com/Oaklight/veilrender/pull/22
 [#23]: https://github.com/Oaklight/veilrender/pull/23
+[#25]: https://github.com/Oaklight/veilrender/pull/25
