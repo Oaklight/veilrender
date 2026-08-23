@@ -1,19 +1,6 @@
-FROM python:3.12-slim AS gbm-donor
+## ── shared base ──────────────────────────────────────────
+FROM python:3.12-slim AS base
 
-# Extract libgbm and its runtime deps without pulling in mesa/llvm (~200MB)
-RUN apt-get update && apt-get install -y --no-install-recommends libgbm1 \
-    && rm -rf /var/lib/apt/lists/*
-RUN mkdir /gbm-libs && \
-    for lib in libgbm libdrm libwayland-server; do \
-        cp -a /usr/lib/x86_64-linux-gnu/${lib}.so* /gbm-libs/ 2>/dev/null || true; \
-    done
-
-FROM python:3.12-slim
-
-# libgbm without mesa/llvm
-COPY --from=gbm-donor /gbm-libs/* /usr/lib/x86_64-linux-gnu/
-
-# System libraries required by headless Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libatk1.0-0 \
         libatk-bridge2.0-0 \
@@ -36,19 +23,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# HF Spaces runs as non-root user with UID 1000
 RUN useradd -m -u 1000 user || true
-
 WORKDIR /app
-
-# Install Python package (includes cloakbrowser + patchright)
 COPY pyproject.toml .
 COPY src/ src/
 RUN pip install --no-cache-dir .
 
-# Pre-download CloakBrowser Chromium binary as runtime user
+## ── gateway (no browser, ~500MB) ─────────────────────────
+## docker build --target gateway -t oaklight/veilrender:gateway .
+FROM base AS gateway
+
+USER 1000
+EXPOSE 7860
+CMD ["python", "-m", "veilrender"]
+
+## ── libgbm donor (avoids pulling mesa/llvm ~200MB) ───────
+FROM python:3.12-slim AS gbm-donor
+
+RUN apt-get update && apt-get install -y --no-install-recommends libgbm1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir /gbm-libs && \
+    for lib in libgbm libdrm libwayland-server; do \
+        cp -a /usr/lib/x86_64-linux-gnu/${lib}.so* /gbm-libs/ 2>/dev/null || true; \
+    done
+
+## ── full (CloakBrowser embedded, ~1.2GB) ─────────────────
+## docker build -t oaklight/veilrender:latest .
+FROM base AS full
+
+COPY --from=gbm-donor /gbm-libs/* /usr/lib/x86_64-linux-gnu/
 USER 1000
 RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
 EXPOSE 7860
-
 CMD ["python", "-m", "veilrender"]

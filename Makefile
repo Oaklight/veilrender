@@ -1,4 +1,4 @@
-.PHONY: dev build run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf update-blocklist help
+.PHONY: dev build build-gateway run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf update-blocklist help
 
 REGISTRY_MIRROR ?= docker.io
 BLOCKLIST_URL := https://cdn.jsdelivr.net/gh/StevenBlack/hosts@master/hosts
@@ -9,7 +9,10 @@ dev:
 	python -m veilrender
 
 build:
-	docker build -t $(DOCKER_IMAGE):latest .
+	docker build --target full -t $(DOCKER_IMAGE):latest .
+
+build-gateway:
+	docker build --target gateway -t $(DOCKER_IMAGE):gateway .
 
 run:
 	docker run --rm -p 7860:7860 -e VEILRENDER_API_TOKEN=dev-token $(DOCKER_IMAGE):latest
@@ -63,7 +66,11 @@ endif
 	COMMIT=$$(git rev-parse --short HEAD); \
 	DEV_VER="$(VERSION).dev0+g$$COMMIT"; \
 	echo "==> Building Docker image ($$DEV_VER)..."; \
-	docker build -t $(DOCKER_IMAGE):dev-test -q .; \
+	if [ -n "$(POOL)" ]; then \
+		docker build --target gateway -t $(DOCKER_IMAGE):dev-test -q .; \
+	else \
+		docker build --target full -t $(DOCKER_IMAGE):dev-test -q .; \
+	fi; \
 	echo "==> Deploying to $(SSH_TARGET) via zstd..."; \
 	if [ -n "$(POOL)" ]; then \
 		COMPOSE_SRC="deploy/compose-pool.yaml"; \
@@ -110,9 +117,10 @@ endif
 
 help:
 	@echo "Available targets:"
-	@echo "  dev          - Run development server on :7860"
-	@echo "  build        - Build Docker image"
-	@echo "  run          - Run Docker container"
+	@echo "  dev            - Run development server on :7860"
+	@echo "  build          - Build full Docker image (with CloakBrowser)"
+	@echo "  build-gateway  - Build gateway-only Docker image (no browser)"
+	@echo "  run            - Run Docker container"
 	@echo "  lint         - Run ruff check and format"
 	@echo "  typecheck    - Run ty check"
 	@echo "  vendor       - Re-vendor zerodep modules"

@@ -10,7 +10,7 @@
 
 services:
   veilrender:
-    image: oaklight/veilrender:latest
+    image: oaklight/veilrender:gateway
     container_name: veilrender
     restart: unless-stopped
     ports:
