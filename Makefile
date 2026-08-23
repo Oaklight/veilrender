@@ -82,7 +82,8 @@ endif
 	scp $$COMPOSE_SRC $(SSH_TARGET):$(DEVTEST_STACK)/compose.yaml; \
 	ssh $(SSH_TARGET) \
 		'cd $(DEVTEST_STACK) && \
-		 sed -i "s|image: oaklight/veilrender:.*|image: $(DOCKER_IMAGE):dev-test|" compose.yaml && \
+		 sed -i "s|image: oaklight/veilrender:[^ ]*|image: $(DOCKER_IMAGE):dev-test|" compose.yaml && \
+		 sed -i "s|VEILRENDER_API_TOKEN=changeme|VEILRENDER_API_TOKEN=$${VEILRENDER_API_TOKEN:-changeme}|" compose.yaml && \
 		 docker compose up -d --force-recreate && \
 		 sleep 5 && \
 		 echo "=== Health check ===" && \
