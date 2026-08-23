@@ -1,4 +1,17 @@
+FROM python:3.12-slim AS gbm-donor
+
+# Extract libgbm and its runtime deps without pulling in mesa/llvm (~200MB)
+RUN apt-get update && apt-get install -y --no-install-recommends libgbm1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir /gbm-libs && \
+    for lib in libgbm libdrm libwayland-server; do \
+        cp -a /usr/lib/x86_64-linux-gnu/${lib}.so* /gbm-libs/ 2>/dev/null || true; \
+    done
+
 FROM python:3.12-slim
+
+# libgbm without mesa/llvm
+COPY --from=gbm-donor /gbm-libs/* /usr/lib/x86_64-linux-gnu/
 
 # System libraries required by headless Chromium
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,7 +27,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxext6 \
         libxfixes3 \
         libxrandr2 \
-        libgbm1 \
         libcairo2 \
         libpango-1.0-0 \
         libnss3 \
@@ -37,8 +49,6 @@ RUN pip install --no-cache-dir .
 # Pre-download CloakBrowser Chromium binary as runtime user
 USER 1000
 RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
-# Install Patchright's Chromium driver
-RUN patchright install chromium
 EXPOSE 7860
 
 CMD ["python", "-m", "veilrender"]
