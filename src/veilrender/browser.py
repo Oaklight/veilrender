@@ -40,6 +40,34 @@ def _ws_to_http(endpoint: str) -> str:
     return endpoint
 
 
+def _resolve_to_ip(endpoint: str) -> str:
+    """Replace hostname with IP in a CDP endpoint URL.
+
+    Chromium's CDP HTTP API rejects Host headers that aren't IP
+    addresses or ``localhost``. This resolves the hostname to an IP
+    so connections from Docker containers (where the Host header
+    would be e.g. ``browser-worker:9222``) work correctly.
+    """
+    import socket
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(endpoint)
+    host = parsed.hostname
+    if not host or host in ("localhost", "127.0.0.1", "::1"):
+        return endpoint
+    try:
+        float(host.replace(".", "").replace(":", ""))
+        return endpoint
+    except ValueError:
+        pass
+    try:
+        ip = socket.gethostbyname(host)
+        new_netloc = f"{ip}:{parsed.port}" if parsed.port else ip
+        return urlunparse(parsed._replace(netloc=new_netloc))
+    except socket.gaierror:
+        return endpoint
+
+
 # ---------------------------------------------------------------------------
 # Worker base interface
 # ---------------------------------------------------------------------------
@@ -241,7 +269,8 @@ class RemoteWorker(_BaseWorker):
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.connect_over_cdp(self.endpoint)
+        resolved = _resolve_to_ip(self.endpoint)
+        self._browser = await self._playwright.chromium.connect_over_cdp(resolved)
         self.healthy = True
         logger.info("Connected to remote browser at %s", self.endpoint)
 
@@ -270,7 +299,7 @@ class RemoteWorker(_BaseWorker):
 
     async def get_cdp_url(self) -> str | None:
         await self.ensure_ready()
-        http_endpoint = _ws_to_http(self.endpoint)
+        http_endpoint = _ws_to_http(_resolve_to_ip(self.endpoint))
         try:
             data = await asyncio.to_thread(_fetch_json, f"{http_endpoint}/json/version")
             ws_url = data.get("webSocketDebuggerUrl")
