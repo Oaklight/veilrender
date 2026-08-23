@@ -200,6 +200,7 @@ class _BaseWorker:
     """Common interface for local and remote browser workers."""
 
     endpoint: str = "unknown"
+    worker_type: str = "unknown"
 
     def __init__(self, max_concurrent: int) -> None:
         self.max_concurrent = max_concurrent
@@ -274,6 +275,7 @@ class LocalWorker(_BaseWorker):
         super().__init__(max_concurrent)
         self.cdp_port = cdp_port
         self.endpoint = "local"
+        self.worker_type = "cdp"
         self._playwright = None
         self._browser: Browser | None = None
         self._chrome_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
@@ -395,6 +397,7 @@ class RemoteWorker(_BaseWorker):
     def __init__(self, endpoint: str, max_concurrent: int) -> None:
         super().__init__(max_concurrent)
         self.endpoint = endpoint
+        self.worker_type = "cdp"
         self._playwright = None
         self._browser: Browser | None = None
         self._lock = asyncio.Lock()
@@ -470,6 +473,7 @@ class PlaywrightWorker(_BaseWorker):
     def __init__(self, endpoint: str, max_concurrent: int) -> None:
         super().__init__(max_concurrent)
         self.endpoint = endpoint
+        self.worker_type = "playwright"
         self._playwright = None
         self._browser: Browser | None = None
         self._lock = asyncio.Lock()
@@ -634,6 +638,7 @@ class BrowserManager:
             result.append(
                 {
                     "index": i,
+                    "type": w.worker_type,
                     "endpoint": w.endpoint,
                     "healthy": w.healthy,
                     "active": w.active,
@@ -647,14 +652,14 @@ class BrowserManager:
     async def get_cdp_url(self, worker_index: int | None = None) -> str | None:
         if worker_index is not None and 0 <= worker_index < len(self._workers):
             w = self._workers[worker_index]
-            if w.healthy:
+            if w.healthy and w.worker_type == "cdp":
                 return await w.get_cdp_url()
             return None
-        try:
-            w = self._pick_worker()
-            return await w.get_cdp_url()
-        except RuntimeError:
+        cdp_workers = [w for w in self._workers if w.healthy and w.worker_type == "cdp"]
+        if not cdp_workers:
             return None
+        w = max(cdp_workers, key=lambda w: w.available)
+        return await w.get_cdp_url()
 
     @asynccontextmanager
     async def get_page(

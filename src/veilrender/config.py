@@ -11,9 +11,12 @@ def _parse_worker_entry(entry: str) -> tuple[str, str]:
     Supported formats:
     - ``cdp://host:9222`` → ("cdp", "http://host:9222")
     - ``playwright://host:1234/path`` → ("playwright", "ws://host:1234/path")
+    - ``playwrights://host:1234/path`` → ("playwright", "wss://host:1234/path")
     - ``http://host:9222`` → ("cdp", "http://host:9222")
     - ``host:9222`` → ("cdp", "http://host:9222")
     """
+    if entry.startswith("playwrights://"):
+        return ("playwright", "wss://" + entry[len("playwrights://") :])
     if entry.startswith("playwright://"):
         return ("playwright", "ws://" + entry[len("playwright://") :])
     if entry.startswith("cdp://"):
