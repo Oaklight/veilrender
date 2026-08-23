@@ -27,9 +27,10 @@ RUN useradd -m -u 1000 user || true
 WORKDIR /app
 COPY pyproject.toml .
 COPY src/ src/
+COPY scripts/ scripts/
 RUN pip install --no-cache-dir .
 
-## ── gateway (no browser, ~500MB) ─────────────────────────
+## ── gateway (no browser, ~350MB) ─────────────────────────
 ## docker build --target gateway -t oaklight/veilrender:gateway .
 FROM base AS gateway
 
@@ -47,12 +48,12 @@ RUN mkdir /gbm-libs && \
         cp -a /usr/lib/x86_64-linux-gnu/${lib}.so* /gbm-libs/ 2>/dev/null || true; \
     done
 
-## ── full (CloakBrowser embedded, ~1.2GB) ─────────────────
+## ── full (CloakBrowser binary downloaded directly) ───────
 ## docker build -t oaklight/veilrender:latest .
 FROM base AS full
 
 COPY --from=gbm-donor /gbm-libs/* /usr/lib/x86_64-linux-gnu/
 USER 1000
-RUN python -c "from cloakbrowser import ensure_binary; ensure_binary()"
+RUN python scripts/download-cloakbrowser.py
 EXPOSE 7860
 CMD ["python", "-m", "veilrender"]

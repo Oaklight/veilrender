@@ -7,15 +7,17 @@ workers when ``VEILRENDER_WORKERS`` is configured.
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
+import os
+import random
 import subprocess
 import urllib.request
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
-from cloakbrowser import ensure_binary, get_default_stealth_args
 from patchright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from veilrender.config import settings
@@ -24,6 +26,115 @@ from veilrender.filters import load_blocklist, make_route_handler
 logger = logging.getLogger(__name__)
 
 CDP_PORT = 9222
+
+_CLOAKBROWSER_DEFAULT_DIR = os.path.expanduser("~/.cloakbrowser")
+
+
+_CLOAKBROWSER_PYPI_URL = "https://pypi.org/pypi/cloakbrowser/json"
+
+
+def _resolve_chromium_version() -> str:
+    """Resolve CloakBrowser's Chromium version from the PyPI wheel."""
+    import re
+    import zipfile
+    from io import BytesIO
+
+    pypi = _fetch_json(_CLOAKBROWSER_PYPI_URL, timeout=30)
+    whl_url = next(u["url"] for u in pypi["urls"] if u["filename"].endswith(".whl"))
+    whl_data = urllib.request.urlopen(whl_url, timeout=60).read()
+    with zipfile.ZipFile(BytesIO(whl_data)) as zf:
+        for name in zf.namelist():
+            if name.endswith("config.py"):
+                content = zf.read(name).decode()
+                m = re.search(r'CHROMIUM_VERSION\s*=\s*"([^"]+)"', content)
+                if m:
+                    return m.group(1)
+    raise RuntimeError("Could not resolve CloakBrowser Chromium version")
+
+
+def _detect_platform() -> str:
+    """Detect platform string for CloakBrowser download URL."""
+    import platform as _platform
+
+    machine = _platform.machine().lower()
+    system = _platform.system().lower()
+    if system == "linux":
+        arch = "x64" if machine in ("x86_64", "amd64") else "arm64"
+        return f"linux-{arch}"
+    if system == "darwin":
+        arch = "arm64" if machine == "arm64" else "x64"
+        return f"mac-{arch}"
+    raise RuntimeError(f"Unsupported platform: {system}-{machine}")
+
+
+def _download_browser_binary() -> str:
+    """Download CloakBrowser binary from cloakbrowser.dev (or mirror)."""
+    import tarfile
+
+    version = _resolve_chromium_version()
+    plat = _detect_platform()
+    gh_url = f"https://github.com/CloakHQ/cloakbrowser/releases/download/chromium-v{version}/cloakbrowser-{plat}.tar.gz"
+    mirror = os.environ.get("CLOAKBROWSER_MIRROR", "")
+    url = f"{mirror}/{gh_url}" if mirror else gh_url
+    dest_dir = os.path.join(_CLOAKBROWSER_DEFAULT_DIR, f"chromium-{version}")
+    binary = os.path.join(dest_dir, "chrome")
+
+    if os.path.isfile(binary):
+        logger.info("Binary already exists at %s", binary)
+        return binary
+
+    logger.info("Downloading CloakBrowser %s (%s)...", version, plat)
+    os.makedirs(dest_dir, exist_ok=True)
+    tmp = os.path.join(dest_dir, ".download.tar.gz")
+    try:
+        urllib.request.urlretrieve(url, tmp)
+        with tarfile.open(tmp, "r:gz") as tf:
+            tf.extractall(dest_dir)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+    if os.path.isfile(binary):
+        os.chmod(binary, 0o755)
+    logger.info("Downloaded CloakBrowser %s to %s", version, binary)
+    return binary
+
+
+def _find_browser_binary() -> str:
+    """Locate a CloakBrowser (or compatible) Chromium binary.
+
+    Search order:
+    1. CLOAKBROWSER_BINARY env var
+    2. ~/.cloakbrowser/*/chrome (pre-downloaded or Docker-installed)
+    3. Auto-download from cloakbrowser.dev
+    """
+    env_path = os.environ.get("CLOAKBROWSER_BINARY")
+    if env_path:
+        if os.path.isfile(env_path) and os.access(env_path, os.X_OK):
+            logger.info("Using browser binary from CLOAKBROWSER_BINARY: %s", env_path)
+            return env_path
+        raise FileNotFoundError(
+            f"CLOAKBROWSER_BINARY={env_path} not found or not executable"
+        )
+
+    candidates = sorted(
+        glob.glob(f"{_CLOAKBROWSER_DEFAULT_DIR}/*/chrome"), reverse=True
+    )
+    if candidates:
+        logger.info("Found browser binary: %s", candidates[0])
+        return candidates[0]
+
+    return _download_browser_binary()
+
+
+def _get_stealth_args() -> list[str]:
+    """Get stealth launch arguments for CloakBrowser."""
+    fingerprint = random.randint(10000, 99999)
+    return [
+        "--no-sandbox",
+        f"--fingerprint={fingerprint}",
+        "--fingerprint-platform=linux",
+    ]
 
 
 def _fetch_json(url: str, timeout: int = 2) -> Any:
@@ -169,8 +280,8 @@ class LocalWorker(_BaseWorker):
         self._lock = asyncio.Lock()
 
     async def start(self) -> None:
-        executable_path = ensure_binary()
-        stealth_args = get_default_stealth_args()
+        executable_path = _find_browser_binary()
+        stealth_args = _get_stealth_args()
 
         chrome_args = [
             executable_path,
