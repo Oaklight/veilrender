@@ -3,7 +3,7 @@
 # deps = ["soup"]
 # tier = "medium"
 # category = "text"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add readability`"
 # ///
 
 """HTML readability content extractor — zero-dep, stdlib only, Python 3.10+.
