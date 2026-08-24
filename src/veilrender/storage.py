@@ -1,10 +1,10 @@
 """Two-tier render cache: in-memory L1 + S3-compatible L2.
 
 L1 uses the vendored TTLCache for fast in-process lookups.
-L2 uses the minio client for persistent S3-compatible storage
+L2 uses the vendored S3Client for persistent S3-compatible storage
 (Cloudflare R2, Oracle Object Storage, AWS S3, MinIO, etc.).
 
-S3 operations run in asyncio.to_thread() since minio is synchronous.
+S3 operations run in asyncio.to_thread() since S3Client is synchronous.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class StorageManager:
 
     def __init__(self) -> None:
         self._l1: TTLCache | None = None
-        self._s3 = None  # minio.Minio instance or None
+        self._s3 = None  # S3Client instance or None
         self._bucket: str = settings.s3_bucket
 
         if not settings.cache_enabled:
@@ -53,24 +53,19 @@ class StorageManager:
         # L2: S3-compatible storage
         if settings.s3_endpoint and settings.s3_access_key and settings.s3_secret_key:
             try:
-                from minio import Minio
+                from veilrender._vendor.s3 import S3Client
 
-                self._s3 = Minio(
-                    settings.s3_endpoint,
+                self._s3 = S3Client(
+                    endpoint=settings.s3_endpoint,
                     access_key=settings.s3_access_key,
                     secret_key=settings.s3_secret_key,
-                    region=settings.s3_region if settings.s3_region != "auto" else None,
+                    region=settings.s3_region,
                     secure=settings.s3_secure,
                 )
                 logger.info(
                     "L2 S3 cache enabled (endpoint=%s, bucket=%s)",
                     settings.s3_endpoint,
                     self._bucket,
-                )
-            except ImportError:
-                logger.warning(
-                    "minio package not installed, L2 cache disabled. "
-                    "Install with: pip install minio"
                 )
             except Exception:
                 logger.warning("Failed to initialize S3 client", exc_info=True)
