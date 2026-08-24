@@ -7,10 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-24
+
 ### Added
 
 - **Remote browser worker pool** for horizontal scaling — `VEILRENDER_WORKERS` env var routes requests to remote CDP endpoints via least-connections routing ([#25])
-- `LocalWorker` / `RemoteWorker` abstraction with shared `_BaseWorker` interface ([#25])
+- **Firefox/Camoufox worker support** — `playwright://` protocol prefix for connecting to Playwright-compatible browsers (Camoufox, etc.) alongside CDP workers ([#27])
+- `LocalWorker` / `RemoteWorker` / `PlaywrightWorker` abstraction with shared `_BaseWorker` interface ([#25], [#27])
 - Worker health checks with automatic reconnection for remote workers ([#25])
 - CDP proxy `?worker=N` query param for targeted worker routing ([#25])
 - Per-worker Prometheus gauges: `veilrender_worker_healthy`, `veilrender_worker_active_pages`, `veilrender_worker_browser_pages` ([#25])
@@ -21,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - SVG ring gauge for capacity visualization on dashboard ([#22])
 - Author credit and badges in dashboard footer ([#22])
 - Multi-target Dockerfile: `gateway` (336MB, no browser) and `full` (1.07GB, CloakBrowser embedded)
-- `deploy/compose.yaml` (single-instance) and `deploy/compose-pool.yaml` (gateway + `cloakhq/cloakbrowser` workers)
+- `deploy/compose.yaml` (single-instance), `deploy/compose-pool.yaml` (Chromium pool), `deploy/compose-pool-mixed.yaml` (Chromium + Camoufox mixed pool)
+- `deploy/Dockerfile.camoufox` for Camoufox server worker image ([#27])
 - `POOL=1` flag for `make deploy-dev` to deploy in pool mode
 - `CLOAKBROWSER_MIRROR` env var for China downloads (e.g. `https://ghfast.top`)
 - `CLOAKBROWSER_BINARY` env var to use a custom browser binary path
@@ -31,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Migrate from Playwright to Patchright** — drop-in replacement with stealth driver patches for Chromium ([#25])
+- **Replace `minio` with vendored zerodep `S3Client`** — only `patchright` remains as runtime dependency ([#27])
 - Remove `cloakbrowser` pip dependency — binary downloaded directly from GitHub Releases, stealth args generated inline
+- Prune 8 unused vendor modules (368K → 184K): config, dotenv, yaml, jsonx, markdown, structlog, useragent, retry ([#27])
 - Docker image size: full 1.43GB → 1.07GB, gateway 498MB → 336MB (removed playwright transitive dep + multi-stage libgbm extraction)
 - Dashboard redesign: dark theme inspired by modal.com — pure black background, mint-green accents, DM Sans + JetBrains Mono typography ([#22])
 - Dashboard data refresh: replaced `<meta http-equiv="refresh">` full-page reload with fetch-based polling — no more flashing or scroll reset ([#22])
@@ -46,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - HF Spaces badge (space was taken down) ([#22])
 - `cloakbrowser` pip dependency (binary auto-downloaded instead)
+- `minio` pip dependency (replaced by vendored S3Client) ([#27])
 
 ## [0.3.1] - 2026-07-04
 
@@ -125,7 +132,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Oaklight/veilrender/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Oaklight/veilrender/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Oaklight/veilrender/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Oaklight/veilrender/compare/v0.1.0...v0.2.0
@@ -153,3 +161,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#22]: https://github.com/Oaklight/veilrender/pull/22
 [#23]: https://github.com/Oaklight/veilrender/pull/23
 [#25]: https://github.com/Oaklight/veilrender/pull/25
+[#27]: https://github.com/Oaklight/veilrender/pull/27
