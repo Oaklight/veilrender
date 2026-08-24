@@ -25,7 +25,7 @@ typecheck:
 	ty check src/veilrender/
 
 vendor:
-	cd ~/projects/zerodep && python zerodep.py add httpserver readability soup markdown cache config useragent retry structlog -d $(CURDIR)/src/veilrender/_vendor/ -y -f
+	cd ~/projects/zerodep && python zerodep.py add httpserver readability soup cache s3 -d $(CURDIR)/src/veilrender/_vendor/ -y -f
 
 update-blocklist:
 	curl -sL "$(BLOCKLIST_URL)" \
