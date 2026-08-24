@@ -24,12 +24,8 @@ CACHE_DIR = os.environ.get(
 
 def _get_chromium_version(pip_version: str | None = None) -> str:
     """Get CloakBrowser's Chromium version from PyPI wheel metadata."""
-    pypi = json.loads(
-        urllib.request.urlopen(PYPI_JSON, timeout=30).read()
-    )
-    whl_url = next(
-        u["url"] for u in pypi["urls"] if u["filename"].endswith(".whl")
-    )
+    pypi = json.loads(urllib.request.urlopen(PYPI_JSON, timeout=30).read())
+    whl_url = next(u["url"] for u in pypi["urls"] if u["filename"].endswith(".whl"))
     whl_data = urllib.request.urlopen(whl_url, timeout=60).read()
     with zipfile.ZipFile(BytesIO(whl_data)) as zf:
         for name in zf.namelist():
