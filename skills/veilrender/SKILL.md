@@ -19,17 +19,40 @@ Render JavaScript-heavy or bot-protected pages via a VeilRender API instance.
 Use this when `curl`/`fetch` returns empty or incomplete content because the
 page requires a real browser to render.
 
-## Prerequisites
+## Setup
 
-1. A running VeilRender instance (URL + optional API token)
-2. `curl` available in PATH
+Before first use, check if the user already has a VeilRender instance configured.
 
-Configure via environment variables or pass directly:
-
+**Step 1**: Check for existing configuration:
 ```bash
-export VEILRENDER_URL="https://veilrender.service.oaklight.top"
-export VEILRENDER_TOKEN="your-api-token"
+echo "URL: ${VEILRENDER_URL:-not set}"
+echo "Token: ${VEILRENDER_TOKEN:+configured}"
 ```
+
+**Step 2**: If either is missing, **ask the user**:
+- "Do you have a hosted VeilRender instance? If so, what is the URL and API token?"
+- If they don't have one, suggest self-hosting:
+  ```bash
+  docker run -d -p 7860:7860 -e VEILRENDER_API_TOKEN=changeme oaklight/veilrender:latest
+  # Then set:
+  export VEILRENDER_URL="http://localhost:7860"
+  export VEILRENDER_TOKEN="changeme"
+  ```
+
+**Step 3**: Verify connectivity:
+```bash
+curl -sf "$VEILRENDER_URL/health" | jq .
+# Expected: {"status": "ok"}
+```
+
+If health check fails, do NOT proceed — ask the user to check their instance.
+
+### Required environment
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VEILRENDER_URL` | Yes | Base URL of the VeilRender instance |
+| `VEILRENDER_TOKEN` | If auth enabled | API Bearer token |
 
 ## Render a page
 
