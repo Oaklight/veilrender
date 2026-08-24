@@ -1,0 +1,20 @@
+# Dev instance: VeilRender with embedded CloakBrowser on port 7861
+services:
+  veilrender-dev:
+    image: oaklight/veilrender:dev-test
+    container_name: veilrender-dev
+    restart: unless-stopped
+    ports:
+      - "7861:7860"
+    environment:
+      - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
+      - VEILRENDER_RESOURCE_FILTER=true
+    volumes:
+      - veilrender-dev-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+volumes:
+  veilrender-dev-data:

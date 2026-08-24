@@ -52,7 +52,7 @@ push-package:
 # ──────────────────────────────────────────────
 
 SSH_TARGET ?=
-DEVTEST_STACK ?= /dockervol/dockge/stacks/veilrender
+DEVTEST_STACK ?= /dockervol/dockge/stacks/veilrender-dev
 
 # Build dev-test image, push to remote VPS, restart container.
 # Usage: make deploy-dev SSH_TARGET=cloud.usa2
@@ -75,7 +75,7 @@ endif
 	if [ -n "$(POOL)" ]; then \
 		COMPOSE_SRC="deploy/compose-pool.yaml"; \
 	else \
-		COMPOSE_SRC="deploy/compose.yaml"; \
+		COMPOSE_SRC="deploy/compose-dev.yaml"; \
 	fi; \
 	docker save $(DOCKER_IMAGE):dev-test | zstd -3 | ssh $(SSH_TARGET) \
 		'zstd -d | docker load'; \
@@ -87,7 +87,7 @@ endif
 		 docker compose up -d --force-recreate && \
 		 sleep 5 && \
 		 echo "=== Health check ===" && \
-		 curl -sS -o /dev/null -w "%{http_code} /health\n" http://127.0.0.1:7860/ || true'; \
+		 curl -sS -o /dev/null -w "%{http_code} /health\n" http://127.0.0.1:7861/ || true'; \
 	echo "==> VPS dev-test deployed successfully ($$DEV_VER, $${COMPOSE_SRC})."
 
 # Deploy to Hugging Face Spaces by pushing current code.
