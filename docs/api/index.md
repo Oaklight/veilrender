@@ -4,7 +4,7 @@ title: API Reference
 
 # API Reference
 
-VeilRender exposes a simple HTTP API for rendering web pages and capturing screenshots.
+VeilRender exposes an HTTP API for rendering web pages, capturing screenshots, and managing browser workers.
 
 ## Endpoints
 
@@ -13,6 +13,9 @@ VeilRender exposes a simple HTTP API for rendering web pages and capturing scree
 | `POST` | [`/render`](render.md) | Render a URL and return page content |
 | `POST` | [`/screenshot`](screenshot.md) | Capture a screenshot of a URL |
 | `GET` | [`/health`](health.md) | Health check |
+| `GET` | [`/metrics`](metrics.md) | Prometheus metrics |
+| `GET` | [`/stats`](stats.md) | Dashboard stats JSON API |
+| `WS` | [`/cdp`](cdp.md) | CDP WebSocket proxy |
 | `GET` | [`/`](dashboard.md) | Stats dashboard |
 
 ## Authentication
@@ -23,4 +26,4 @@ If `VEILRENDER_API_TOKEN` is set, all `/render` and `/screenshot` requests requi
 Authorization: Bearer <your-token>
 ```
 
-The `/health` and `/` (dashboard) endpoints do not require authentication.
+The `/health`, `/metrics`, `/stats`, and `/` (dashboard) endpoints do not require authentication. The `/cdp` endpoint requires authentication if `VEILRENDER_API_TOKEN` is set.

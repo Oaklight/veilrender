@@ -15,8 +15,11 @@ Run VeilRender directly on a server without containers.
 
 ```bash
 pip install veilrender
-playwright install chromium
 ```
+
+Since v0.4.0, VeilRender auto-downloads CloakBrowser on first run—no manual browser install needed.
+
+For custom setups, set `CLOAKBROWSER_BINARY` to point to your own browser binary, or set `CLOAKBROWSER_MIRROR` to a GitHub mirror URL (e.g. `https://ghfast.top`) for faster downloads in China. See [Configuration](../configuration.md#browser-binary) for details.
 
 ## Run
 

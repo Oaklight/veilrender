@@ -1,10 +1,10 @@
 site_name: VeilRender
-site_description: Headless browser rendering API — self-hostable on HF Spaces, Docker, or bare metal
+site_description: Headless browser rendering API with stealth capabilities — self-hostable via Docker or pip
 site_author: Peng Ding
 site_url: https://veilrender.readthedocs.io/en/latest
 repo_name: Oaklight/veilrender
 repo_url: https://github.com/Oaklight/veilrender
-copyright: Copyright &copy; 2025 Peng Ding
+copyright: Copyright &copy; 2025–2026 Peng Ding
 
 theme:
   name: material
@@ -104,11 +104,15 @@ nav:
       - POST /screenshot: api/screenshot.md
       - GET /health: api/health.md
       - GET / (Dashboard): api/dashboard.md
+      - GET /metrics: api/metrics.md
+      - GET /stats: api/stats.md
+      - WS /cdp: api/cdp.md
   - Deployment:
       - deployment/index.md
       - Docker: deployment/docker.md
       - HF Spaces: deployment/hf-spaces.md
       - Bare Metal: deployment/bare-metal.md
   - Configuration: configuration.md
+  - Security: security.md
   - Benchmark: benchmark.md
   - Changelog: changelog.md

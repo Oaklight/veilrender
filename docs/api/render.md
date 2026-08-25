@@ -4,7 +4,7 @@ title: POST /render
 
 # POST /render
 
-Render a URL using a headless Chromium browser and return the page content in multiple formats.
+Render a URL using a stealth headless browser and return the page content in multiple formats.
 
 ## Request
 
@@ -12,14 +12,16 @@ Render a URL using a headless Chromium browser and return the page content in mu
 curl -X POST http://localhost:7860/render \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
+  -d '{"url": "https://example.com", "formats": ["html", "markdown"], "wait_until": "networkidle"}'
 ```
 
 ### Request body
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `url` | string | Yes | The URL to render |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | *(required)* | URL to render |
+| `formats` | string[] | `["html"]` | Output formats: `html`, `readability`, `markdown` |
+| `wait_until` | string | `"load"` | Playwright wait strategy: `load`, `domcontentloaded`, `networkidle` |
 
 ## Response
 
