@@ -4,7 +4,7 @@ title: POST /render
 
 # POST /render
 
-使用无头 Chromium 浏览器渲染指定 URL，并以多种格式返回页面内容。
+使用隐身无头浏览器渲染指定 URL，并以多种格式返回页面内容。
 
 ## 请求
 
@@ -12,14 +12,16 @@ title: POST /render
 curl -X POST http://localhost:7860/render \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com"}'
+  -d '{"url": "https://example.com", "formats": ["html", "markdown"], "wait_until": "networkidle"}'
 ```
 
 ### 请求体
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `url` | string | 是 | 要渲染的 URL |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `url` | string | *（必填）* | 要渲染的 URL |
+| `formats` | string[] | `["html"]` | 输出格式：`html`、`readability`、`markdown` |
+| `wait_until` | string | `"load"` | Playwright 等待策略：`load`、`domcontentloaded`、`networkidle` |
 
 ## 响应
 

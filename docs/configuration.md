@@ -31,3 +31,37 @@ Authorization: Bearer <your-token>
 ## 并发
 
 `VEILRENDER_MAX_CONCURRENT` 控制同时渲染的页面数量。值越大内存占用越高。在 1 GB 容器上，3–5 个并发上下文效果较好。仪表盘 `/` 可查看当前容量使用情况。
+
+## Worker 池
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VEILRENDER_WORKERS` | *(无)* | 逗号分隔的 Worker 端点列表（启用池模式） |
+| `VEILRENDER_WORKER_MAX_CONCURRENT` | `5` | 每个 Worker 的页面并发数 |
+| `VEILRENDER_WORKER_HEALTH_INTERVAL` | `10` | 健康检查间隔（秒） |
+
+设置 `VEILRENDER_WORKERS` 后，VeilRender 以 Gateway 模式运行，将渲染请求分发到各 Worker。Worker 端点格式：
+
+- `cdp://host:9222` 或 `http://host:9222` — Chromium CDP Worker
+- `playwright://host:1234/ws-path` — Firefox/Camoufox Playwright Worker
+- `playwrights://host:1234/ws-path` — TLS Playwright Worker
+
+## 浏览器二进制文件
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CLOAKBROWSER_BINARY` | *（自动）* | 自定义浏览器二进制文件路径 |
+| `CLOAKBROWSER_MIRROR` | *(无)* | GitHub 镜像 URL，适用于国内加速（如 `https://ghfast.top`） |
+
+二进制文件检测顺序：环境变量 → `~/.cloakbrowser/*/chrome` → 从 GitHub Releases 自动下载。
+
+## 缓存与存储
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VEILRENDER_CACHE_ENABLED` | `false` | 启用渲染缓存 |
+| `VEILRENDER_CACHE_TTL` | `86400` | 缓存 TTL（秒） |
+| `VEILRENDER_RESOURCE_FILTER` | `true` | 渲染时拦截广告/追踪器 |
+| `VEILRENDER_S3_ENDPOINT` | *(无)* | L2 缓存的 S3 端点 |
+| `VEILRENDER_S3_ACCESS_KEY` | *(无)* | S3 访问密钥 |
+| `VEILRENDER_S3_SECRET_KEY` | *(无)* | S3 私密密钥 |

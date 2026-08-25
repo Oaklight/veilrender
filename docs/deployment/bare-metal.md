@@ -15,8 +15,11 @@ title: 物理机部署
 
 ```bash
 pip install veilrender
-playwright install chromium
 ```
+
+自 v0.4.0 起，VeilRender 在首次运行时会自动下载 CloakBrowser，无需手动安装浏览器。
+
+如需自定义设置，可设置 `CLOAKBROWSER_BINARY` 指向自有浏览器二进制文件，或设置 `CLOAKBROWSER_MIRROR` 为 GitHub 镜像 URL（如 `https://ghfast.top`）以加速国内下载。详见 [配置](../configuration.md#浏览器二进制文件)。
 
 ## 运行
 

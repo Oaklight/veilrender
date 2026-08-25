@@ -1,10 +1,10 @@
 site_name: VeilRender
-site_description: 无头浏览器渲染 API——可自托管于 HF Spaces、Docker 或物理机
+site_description: 具备隐身能力的无头浏览器渲染 API——可通过 Docker 或 pip 自托管
 site_author: Peng Ding
 site_url: https://veilrender.readthedocs.io/zh-cn/latest
 repo_name: Oaklight/veilrender
 repo_url: https://github.com/Oaklight/veilrender
-copyright: Copyright &copy; 2025 Peng Ding
+copyright: Copyright &copy; 2025–2026 Peng Ding
 
 theme:
   name: material
@@ -104,11 +104,15 @@ nav:
       - POST /screenshot: api/screenshot.md
       - GET /health: api/health.md
       - GET / (仪表盘): api/dashboard.md
+      - GET /metrics: api/metrics.md
+      - GET /stats: api/stats.md
+      - WS /cdp: api/cdp.md
   - 部署:
       - deployment/index.md
       - Docker: deployment/docker.md
       - HF Spaces: deployment/hf-spaces.md
       - 物理机部署: deployment/bare-metal.md
   - 配置: configuration.md
+  - 安全: security.md
   - 性能测试: benchmark.md
   - 更新日志: changelog.md
