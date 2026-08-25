@@ -12,6 +12,8 @@
 
 VeilRender 接受一个 URL，使用反检测 Chromium 浏览器返回完整渲染后的页面内容（HTML、Markdown、readability 提取的正文）。专为 fetch 工具在遇到 JavaScript 渲染页面或反爬页面时失败的场景而设计。
 
+![仪表盘](assets/dashboard.png)
+
 ## 特性
 
 - **反检测渲染** —— [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)（71 项 C++ 指纹补丁）+ [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Playwright 反检测分支）

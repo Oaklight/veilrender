@@ -12,6 +12,8 @@ Headless browser rendering API with stealth capabilities — self-hostable via D
 
 VeilRender accepts a URL and returns the fully rendered page content (HTML, Markdown, readability-extracted article) using a stealth Chromium browser. Designed as a fallback for fetch tools that fail on JavaScript-rendered or bot-protected pages.
 
+![Dashboard](assets/dashboard.png)
+
 ## Features
 
 - **Stealth rendering** — [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) (71 C++ fingerprint patches) + [Patchright](https://github.com/AhmedKhaledp-0/patchright-python) (stealth Playwright fork)
