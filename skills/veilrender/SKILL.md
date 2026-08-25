@@ -21,25 +21,47 @@ page requires a real browser to render.
 
 ## Setup
 
-Before first use, check if the user already has a VeilRender instance configured.
+Configuration is persisted in `~/.config/veilrender/config.json` so
+the user only needs to answer once.
 
-**Step 1**: Check for existing configuration:
+**Step 1**: Load saved config (or detect env vars):
 ```bash
-echo "URL: ${VEILRENDER_URL:-not set}"
-echo "Token: ${VEILRENDER_TOKEN:+configured}"
+python3 -c "
+import json, os, pathlib
+cfg_path = pathlib.Path.home() / '.config' / 'veilrender' / 'config.json'
+url = os.environ.get('VEILRENDER_URL', '')
+token = os.environ.get('VEILRENDER_TOKEN', '')
+if not url and cfg_path.exists():
+    cfg = json.loads(cfg_path.read_text())
+    url = cfg.get('url', '')
+    token = cfg.get('token', '')
+print(f'URL: {url or \"not set\"}')
+print(f'Token: {\"configured\" if token else \"not set\"}')
+"
 ```
 
-**Step 2**: If either is missing, **ask the user**:
+**Step 2**: If URL is missing, **ask the user**:
 - "Do you have a hosted VeilRender instance? If so, what is the URL and API token?"
 - If they don't have one, suggest self-hosting:
   ```bash
   docker run -d -p 7860:7860 -e VEILRENDER_API_TOKEN=changeme oaklight/veilrender:latest
-  # Then set:
-  export VEILRENDER_URL="http://localhost:7860"
-  export VEILRENDER_TOKEN="changeme"
   ```
 
-**Step 3**: Verify connectivity:
+**Step 3**: Save the config so it persists across sessions:
+```bash
+python3 -c "
+import json, os, pathlib
+cfg_dir = pathlib.Path.home() / '.config' / 'veilrender'
+cfg_dir.mkdir(parents=True, exist_ok=True)
+cfg_path = cfg_dir / 'config.json'
+cfg = {'url': '$URL', 'token': '$TOKEN'}
+cfg_path.write_text(json.dumps(cfg, indent=2))
+os.chmod(cfg_path, 0o600)
+print(f'Saved to {cfg_path}')
+"
+```
+
+**Step 4**: Verify connectivity:
 ```bash
 curl -sf "$VEILRENDER_URL/health" | jq .
 # Expected: {"status": "ok"}
@@ -47,12 +69,37 @@ curl -sf "$VEILRENDER_URL/health" | jq .
 
 If health check fails, do NOT proceed — ask the user to check their instance.
 
-### Required environment
+### Loading config in commands
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VEILRENDER_URL` | Yes | Base URL of the VeilRender instance |
-| `VEILRENDER_TOKEN` | If auth enabled | API Bearer token |
+Before every curl call, load the config:
+```bash
+eval $(python3 -c "
+import json, os, pathlib
+cfg = {}
+p = pathlib.Path.home() / '.config' / 'veilrender' / 'config.json'
+if p.exists(): cfg = json.loads(p.read_text())
+url = os.environ.get('VEILRENDER_URL') or cfg.get('url', '')
+token = os.environ.get('VEILRENDER_TOKEN') or cfg.get('token', '')
+print(f'export VEILRENDER_URL=\"{url}\"')
+print(f'export VEILRENDER_TOKEN=\"{token}\"')
+")
+```
+
+### Config file
+
+| Path | Format | Permissions |
+|------|--------|-------------|
+| `~/.config/veilrender/config.json` | JSON | `0600` (owner-only) |
+
+```json
+{
+  "url": "https://your-instance.example.com",
+  "token": "your-api-token"
+}
+```
+
+Environment variables (`VEILRENDER_URL`, `VEILRENDER_TOKEN`) override
+the config file when set.
 
 ## Render a page
 
