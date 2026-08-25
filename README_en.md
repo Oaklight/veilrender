@@ -210,6 +210,35 @@ services:
     build: deploy/Dockerfile.camoufox
 ```
 
+### Local Browser Gateway (use your own cookies)
+
+Connect the gateway to your desktop browser to render authenticated pages
+using your existing login sessions. Start Chromium with CDP enabled:
+
+```bash
+chromium --remote-debugging-port=9333
+```
+
+Then run the gateway container:
+
+```bash
+docker run --rm --network host \
+  -e VEILRENDER_PORT=7880 \
+  -e VEILRENDER_WORKERS=http://127.0.0.1:9333 \
+  oaklight/veilrender:gateway
+```
+
+Now `POST /render` to `localhost:7880` renders pages as your logged-in browser
+would — including sites behind authentication, Cloudflare challenges, etc.
+
+> **Tip**: Create a desktop shortcut for CDP-enabled Chromium so you can
+> launch it from your application menu when needed. See
+> [AGENTS.md](AGENTS.md) for details.
+
+> **Note**: Only Chromium-based browsers support CDP. Firefox/Waterfox
+> cannot be used this way (they lack the Juggler protocol that Playwright
+> requires). For Firefox-based stealth rendering, use Camoufox workers.
+
 ## Docker Images
 
 | Tag | Size | Content |

@@ -210,6 +210,29 @@ services:
     build: deploy/Dockerfile.camoufox
 ```
 
+### 本地浏览器网关（使用你的 cookies）
+
+将网关连接到你的桌面浏览器，利用已有的登录会话渲染需要认证的页面。启动带 CDP 的 Chromium：
+
+```bash
+chromium --remote-debugging-port=9333
+```
+
+然后启动网关容器：
+
+```bash
+docker run --rm --network host \
+  -e VEILRENDER_PORT=7880 \
+  -e VEILRENDER_WORKERS=http://127.0.0.1:9333 \
+  oaklight/veilrender:gateway
+```
+
+现在向 `localhost:7880` 发送 `POST /render` 请求，就像你已登录的浏览器一样渲染页面 —— 包括认证页面、Cloudflare 挑战等。
+
+> **提示**：可以创建一个带 CDP 参数的 Chromium 桌面快捷方式，方便需要时从应用菜单启动。详见 [AGENTS.md](AGENTS.md)。
+
+> **注意**：只有 Chromium 系浏览器支持 CDP。Firefox/Waterfox 无法使用此方式（缺少 Playwright 所需的 Juggler 协议）。如需 Firefox 系反检测渲染，请使用 Camoufox 工作节点。
+
 ## Docker 镜像
 
 | 标签 | 大小 | 内容 |
