@@ -105,7 +105,7 @@ curl -X POST http://localhost:7860/render \
 | `full_page` | bool | `false` | 捕获完整可滚动页面 |
 | `scale` | float | — | 设备像素比（如 `2` 表示 Retina） |
 | `selector` | string | — | CSS 选择器，截取特定元素 |
-| `clip` | object | — | 截取区域：`{"x", "y", "width", "height"}` |
+| `clip` | object | — | 截取区域：`{"x": N, "y": N, "width": N, "height": N}` |
 | `color_scheme` | string | — | `"light"`、`"dark"` 或 `"no-preference"` |
 | `wait_for` | string | — | 截图前等待的 CSS 选择器 |
 | `transparent` | bool | `false` | 透明背景（仅 PNG） |

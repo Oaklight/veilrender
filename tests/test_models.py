@@ -133,6 +133,8 @@ class TestValidatePass:
             req.validate()
 
     def test_clip_with_full_page(self):
+        # Intentionally allowed: Playwright applies clip to the full-page
+        # render, capturing a region from the fully-scrolled page.
         req = ScreenshotRequest.from_dict(
             {
                 "url": "https://x.com",
@@ -146,6 +148,17 @@ class TestValidatePass:
         for s in (0.5, 1, 2, 3.0):
             req = ScreenshotRequest.from_dict({"url": "https://x.com", "scale": s})
             req.validate()
+
+    def test_valid_color_schemes(self):
+        for cs in ("light", "dark", "no-preference"):
+            req = ScreenshotRequest.from_dict(
+                {"url": "https://x.com", "color_scheme": cs}
+            )
+            req.validate()
+
+    def test_scale_at_max(self):
+        req = ScreenshotRequest.from_dict({"url": "https://x.com", "scale": 8.0})
+        req.validate()
 
     def test_transparent_png(self):
         req = ScreenshotRequest.from_dict({"url": "https://x.com", "transparent": True})
@@ -226,6 +239,18 @@ class TestValidateFail:
             {"url": "https://x.com", "format": "jpeg", "transparent": True}
         )
         with pytest.raises(ValueError, match="transparent is not supported with jpeg"):
+            req.validate()
+
+    def test_invalid_color_scheme(self):
+        req = ScreenshotRequest.from_dict(
+            {"url": "https://x.com", "color_scheme": "banana"}
+        )
+        with pytest.raises(ValueError, match="Unsupported color_scheme 'banana'"):
+            req.validate()
+
+    def test_scale_too_large(self):
+        req = ScreenshotRequest.from_dict({"url": "https://x.com", "scale": 10})
+        with pytest.raises(ValueError, match="scale must be at most"):
             req.validate()
 
     def test_clip_non_positive_width(self):

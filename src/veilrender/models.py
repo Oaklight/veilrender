@@ -10,6 +10,8 @@ ScreenshotFormat = Literal["png", "jpeg"]
 ColorScheme = Literal["light", "dark", "no-preference"]
 
 _SUPPORTED_FORMATS: set[str] = {"png", "jpeg"}
+_VALID_COLOR_SCHEMES: set[str] = {"light", "dark", "no-preference"}
+_MAX_SCALE: float = 8.0
 
 
 @dataclass
@@ -121,8 +123,20 @@ class ScreenshotRequest:
             if not (0 <= self.quality <= 100):
                 raise ValueError("quality must be between 0 and 100")
 
-        if self.scale is not None and self.scale <= 0:
-            raise ValueError("scale must be a positive number")
+        if self.scale is not None:
+            if self.scale <= 0:
+                raise ValueError("scale must be a positive number")
+            if self.scale > _MAX_SCALE:
+                raise ValueError(f"scale must be at most {_MAX_SCALE}")
+
+        if (
+            self.color_scheme is not None
+            and self.color_scheme not in _VALID_COLOR_SCHEMES
+        ):
+            raise ValueError(
+                f"Unsupported color_scheme '{self.color_scheme}'. "
+                f"Supported: {', '.join(sorted(_VALID_COLOR_SCHEMES))}"
+            )
 
         if self.selector and self.clip:
             raise ValueError("selector and clip are mutually exclusive")
