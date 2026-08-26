@@ -1,4 +1,4 @@
-.PHONY: dev build build-gateway run lint typecheck vendor clean build-package push-package deploy-dev deploy-hf update-blocklist help
+.PHONY: dev build build-gateway run lint typecheck vendor clean build-package push-package deploy-dev update-blocklist help
 
 REGISTRY_MIRROR ?= docker.io
 BLOCKLIST_URL := https://cdn.jsdelivr.net/gh/StevenBlack/hosts@master/hosts
@@ -90,32 +90,6 @@ endif
 		 curl -sS -o /dev/null -w "%{http_code} /health\n" http://127.0.0.1:7861/ || true'; \
 	echo "==> VPS dev-test deployed successfully ($$DEV_VER, $${COMPOSE_SRC})."
 
-# Deploy to Hugging Face Spaces by pushing current code.
-# Usage: make deploy-hf HF_SPACE=oaklight/veilrender
-HF_SPACE ?=
-deploy-hf:
-ifndef HF_SPACE
-	$(error HF_SPACE is required. Usage: make deploy-hf HF_SPACE=oaklight/veilrender)
-endif
-	@set -e; \
-	COMMIT=$$(git rev-parse --short HEAD); \
-	echo "==> Deploying to HF Space $(HF_SPACE) ($$COMMIT)..."; \
-	TMP=$$(mktemp -d); \
-	git clone --depth 1 . "$$TMP/repo"; \
-	cd "$$TMP/repo"; \
-	{ printf '%s\n' '---' 'title: VeilRender' 'emoji: 👻' \
-		'colorFrom: gray' 'colorTo: purple' 'sdk: docker' \
-		'app_port: 7860' 'pinned: false' '---' ''; \
-	  cat README_en.md; } > README.hf.md; \
-	rm -f README.md README_en.md README_zh.md; \
-	mv README.hf.md README.md; \
-	rm -rf .github .pre-commit-config.yaml CLAUDE.md Makefile BENCHMARK.md; \
-	git add -A; \
-	git commit -m "deploy $$COMMIT" --allow-empty; \
-	git push --force "https://oauth2:$${HF_TOKEN}@huggingface.co/spaces/$(HF_SPACE)" HEAD:main; \
-	rm -rf "$$TMP"; \
-	echo "==> HF Space deployed successfully ($$COMMIT)."
-
 help:
 	@echo "Available targets:"
 	@echo "  dev            - Run development server on :7860"
@@ -130,15 +104,11 @@ help:
 	@echo "  build-package - Build Python package"
 	@echo "  push-package  - Push package to PyPI"
 	@echo "  deploy-dev    - Build dev image and deploy to remote VPS"
-	@echo "  deploy-hf     - Deploy to Hugging Face Spaces"
 	@echo ""
 	@echo "Variables:"
 	@echo "  SSH_TARGET=<host>     - SSH target for deploy-dev (required)"
 	@echo "  POOL=1                - Use pool mode (gateway + CloakBrowser workers)"
-	@echo "  HF_SPACE=<user/repo> - HF Space for deploy-hf (required)"
-	@echo "  HF_TOKEN             - HF token (env var, required for deploy-hf)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make deploy-dev SSH_TARGET=cloud.usa2"
 	@echo "  make deploy-dev SSH_TARGET=cloud.usa2 POOL=1"
-	@echo "  make deploy-hf HF_SPACE=oaklight/veilrender"
