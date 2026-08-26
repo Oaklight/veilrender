@@ -265,6 +265,10 @@ make typecheck      # ty check
 make deploy-dev SSH_TARGET=oaklight.buttercup
 ```
 
+## 社区
+
+欢迎通过 [GitHub Issues](https://github.com/Oaklight/veilrender/issues) 或 [LINUX DO](https://linux.do/) 社区参与项目讨论。
+
 ## 许可证
 
 MIT
