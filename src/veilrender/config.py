@@ -73,6 +73,7 @@ class Settings:
             "VEILRENDER_FONT_DIR", os.path.expanduser("~/.fonts")
         )
         self.font_mirror: str = os.environ.get("VEILRENDER_FONT_MIRROR", "")
+        self.font_css: str = os.environ.get("VEILRENDER_FONT_CSS", "")
 
         self.resource_filter: bool = (
             os.environ.get("VEILRENDER_RESOURCE_FILTER", "true").lower() == "true"
