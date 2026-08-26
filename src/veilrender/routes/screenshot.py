@@ -35,14 +35,14 @@ def register(app: App) -> None:
             data = request.json()
         except Exception:
             return Response(
-                body=b'{"error": "Invalid JSON body"}',
+                body=json.dumps({"error": "Invalid JSON body"}).encode(),
                 status_code=400,
                 content_type="application/json",
             )
 
         if "url" not in data:
             return Response(
-                body=b'{"error": "Missing \'url\' field"}',
+                body=json.dumps({"error": "Missing 'url' field"}).encode(),
                 status_code=400,
                 content_type="application/json",
             )
@@ -94,7 +94,9 @@ def register(app: App) -> None:
                     await page.evaluate("() => document.fonts.ready")
 
                 if req.wait_for:
-                    await page.wait_for_selector(req.wait_for, timeout=timeout)
+                    elapsed_ms = (time.monotonic() - t0) * 1000
+                    remaining = max(timeout - elapsed_ms, 0)
+                    await page.wait_for_selector(req.wait_for, timeout=remaining)
 
                 screenshot_kwargs: dict[str, Any] = {
                     "full_page": req.full_page,
@@ -137,5 +139,5 @@ def register(app: App) -> None:
         return Response(
             body=image_bytes,
             status_code=200,
-            content_type=_CONTENT_TYPES.get(req.format, "image/png"),
+            content_type=_CONTENT_TYPES[req.format],
         )

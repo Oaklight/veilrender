@@ -105,7 +105,7 @@ Request body:
 | `full_page` | bool | `false` | Capture the full scrollable page |
 | `scale` | float | — | Device pixel ratio (e.g. `2` for retina) |
 | `selector` | string | — | CSS selector to screenshot a specific element |
-| `clip` | object | — | Region to capture: `{"x", "y", "width", "height"}` |
+| `clip` | object | — | Region to capture: `{"x": N, "y": N, "width": N, "height": N}` |
 | `color_scheme` | string | — | `"light"`, `"dark"`, or `"no-preference"` |
 | `wait_for` | string | — | CSS selector to wait for before capture |
 | `transparent` | bool | `false` | Transparent background (PNG only) |

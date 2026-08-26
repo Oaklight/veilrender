@@ -178,3 +178,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#25]: https://github.com/Oaklight/veilrender/pull/25
 [#27]: https://github.com/Oaklight/veilrender/pull/27
 [#29]: https://github.com/Oaklight/veilrender/issues/29
+[#30]: https://github.com/Oaklight/veilrender/issues/30
