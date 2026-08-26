@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
+from typing import Any
 
 from veilrender._vendor.httpserver import App, Request, Response
 from veilrender import stats
@@ -15,6 +17,11 @@ from veilrender.models import ScreenshotRequest
 from veilrender.url_validator import URLValidationError, validate_url
 
 logger = logging.getLogger(__name__)
+
+_CONTENT_TYPES: dict[str, str] = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+}
 
 
 def register(app: App) -> None:
@@ -40,9 +47,16 @@ def register(app: App) -> None:
                 content_type="application/json",
             )
 
-        req = ScreenshotRequest.from_dict(data)
+        try:
+            req = ScreenshotRequest.from_dict(data)
+            req.validate()
+        except ValueError as exc:
+            return Response(
+                body=json.dumps({"error": str(exc)}).encode(),
+                status_code=400,
+                content_type="application/json",
+            )
 
-        # Validate URL before any processing
         try:
             validate_url(req.url)
         except URLValidationError as exc:
@@ -60,6 +74,8 @@ def register(app: App) -> None:
             async with browser_manager.get_page(
                 viewport_width=req.viewport_width,
                 viewport_height=req.viewport_height,
+                device_scale_factor=req.scale,
+                color_scheme=req.color_scheme,
             ) as (ctx, page):
                 await page.goto(
                     req.url,
@@ -76,7 +92,36 @@ def register(app: App) -> None:
                     await page.add_style_tag(content=emoji_css)
                 if css_urls or emoji_css:
                     await page.evaluate("() => document.fonts.ready")
-                png_bytes = await page.screenshot(full_page=req.full_page)
+
+                if req.wait_for:
+                    await page.wait_for_selector(req.wait_for, timeout=timeout)
+
+                screenshot_kwargs: dict[str, Any] = {
+                    "full_page": req.full_page,
+                }
+                if req.format == "jpeg":
+                    screenshot_kwargs["type"] = "jpeg"
+                    if req.quality is not None:
+                        screenshot_kwargs["quality"] = req.quality
+                if req.transparent:
+                    screenshot_kwargs["omit_background"] = True
+                if req.clip:
+                    screenshot_kwargs["clip"] = {
+                        "x": req.clip.x,
+                        "y": req.clip.y,
+                        "width": req.clip.width,
+                        "height": req.clip.height,
+                    }
+
+                if req.selector:
+                    locator = page.locator(req.selector)
+                    element_kwargs = {
+                        k: v for k, v in screenshot_kwargs.items() if k != "full_page"
+                    }
+                    image_bytes = await locator.screenshot(**element_kwargs)
+                else:
+                    image_bytes = await page.screenshot(**screenshot_kwargs)
+
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.screenshot.record_failure(elapsed)
@@ -90,7 +135,7 @@ def register(app: App) -> None:
         elapsed = (time.monotonic() - t0) * 1000
         stats.screenshot.record_success(elapsed)
         return Response(
-            body=png_bytes,
+            body=image_bytes,
             status_code=200,
-            content_type="image/png",
+            content_type=_CONTENT_TYPES.get(req.format, "image/png"),
         )

@@ -241,19 +241,26 @@ class _BaseWorker:
         *,
         viewport_width: int | None = None,
         viewport_height: int | None = None,
+        device_scale_factor: float | None = None,
+        color_scheme: str | None = None,
         route_handler: Callable | None = None,
     ) -> AsyncIterator[tuple[BrowserContext, Page]]:
         async with self._semaphore:
             browser = await self.ensure_ready()
             context: BrowserContext | None = None
             try:
-                context = await browser.new_context(
-                    viewport={
+                context_kwargs: dict[str, Any] = {
+                    "viewport": {
                         "width": viewport_width or settings.viewport_width,
                         "height": viewport_height or settings.viewport_height,
                     },
-                    user_agent=None,
-                )
+                    "user_agent": None,
+                }
+                if device_scale_factor is not None:
+                    context_kwargs["device_scale_factor"] = device_scale_factor
+                if color_scheme is not None:
+                    context_kwargs["color_scheme"] = color_scheme
+                context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
                 if route_handler:
                     await page.route("**/*", route_handler)
@@ -667,11 +674,15 @@ class BrowserManager:
         *,
         viewport_width: int | None = None,
         viewport_height: int | None = None,
+        device_scale_factor: float | None = None,
+        color_scheme: str | None = None,
     ) -> AsyncIterator[tuple[BrowserContext, Page]]:
         worker = self._pick_worker()
         async with worker.get_page(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
+            device_scale_factor=device_scale_factor,
+            color_scheme=color_scheme,
             route_handler=self._route_handler,
         ) as result:
             yield result
