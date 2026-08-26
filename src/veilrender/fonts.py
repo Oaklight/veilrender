@@ -147,7 +147,12 @@ def _detect_missing_fonts() -> list[str]:
             text=True,
             timeout=5,
         )
-        installed_langs = set(result.stdout.lower().split())
+        installed_langs: set[str] = set()
+        for line in result.stdout.lower().splitlines():
+            for lang in line.split("|"):
+                stripped = lang.strip()
+                if stripped:
+                    installed_langs.add(stripped)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         installed_langs = set()
 
@@ -158,7 +163,7 @@ def _detect_missing_fonts() -> list[str]:
     return missing
 
 
-def _has_local_emoji() -> bool:
+def has_local_emoji() -> bool:
     """Check if a color emoji font is available locally."""
     try:
         result = subprocess.run(
@@ -197,7 +202,7 @@ def get_auto_font_css_urls() -> list[str]:
         return _auto_css_urls
 
     missing = _detect_missing_fonts()
-    _needs_emoji_serving = not _has_local_emoji()
+    _needs_emoji_serving = not has_local_emoji()
 
     if not missing and not _needs_emoji_serving:
         logger.info("All font scripts detected locally, no CSS injection needed")
