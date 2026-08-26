@@ -66,14 +66,18 @@ def _resolve_entries(font_specs: list[str]) -> list[tuple[str, str]]:
     return entries
 
 
-def ensure_fonts(font_specs: list[str]) -> None:
-    """Download fonts that are not already present."""
+def ensure_fonts(font_specs: list[str]) -> bool:
+    """Download fonts that are not already present.
+
+    Returns:
+        True if any fonts were downloaded (caller may need to restart browser).
+    """
     font_dir = Path(settings.font_dir)
     font_dir.mkdir(parents=True, exist_ok=True)
 
     entries = _resolve_entries(font_specs)
     if not entries:
-        return
+        return False
 
     downloaded = 0
     for filename, url in entries:
@@ -111,6 +115,7 @@ def ensure_fonts(font_specs: list[str]) -> None:
             logger.debug("fc-cache failed", exc_info=True)
     else:
         logger.info("All %d font(s) already present", len(entries))
+    return downloaded > 0
 
 
 # ── Auto-detection: probe local fonts, generate CSS for missing ones ─────

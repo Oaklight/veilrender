@@ -8,6 +8,7 @@ permanently in ``~/.fonts/`` for future requests.
 from __future__ import annotations
 
 import logging
+import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -65,6 +66,12 @@ def _download_font(filename: str) -> Path | None:
     try:
         resp = urllib.request.urlopen(url, timeout=60)
         dest.write_bytes(resp.read())
+        try:
+            subprocess.run(
+                ["fc-cache", "-f", str(font_dir)], capture_output=True, timeout=10
+            )
+        except Exception:
+            pass
         return dest
     except Exception:
         logger.warning("Failed to download font %s", filename, exc_info=True)
