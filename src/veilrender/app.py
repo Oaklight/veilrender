@@ -64,10 +64,15 @@ def main() -> None:
     app = create_app()
 
     async def run_server() -> None:
-        if settings.fonts:
-            from veilrender.fonts import ensure_fonts
+        from veilrender.fonts import ensure_fonts, _has_local_emoji
 
+        # Download user-requested fonts
+        if settings.fonts:
             await asyncio.to_thread(ensure_fonts, settings.fonts)
+        # Auto-download emoji if missing (must happen before browser starts)
+        if not _has_local_emoji():
+            logger.info("Emoji font not found, downloading before browser start...")
+            await asyncio.to_thread(ensure_fonts, ["noto-color-emoji"])
         await browser_manager.start()
         await storage_manager.ensure_bucket()
 
