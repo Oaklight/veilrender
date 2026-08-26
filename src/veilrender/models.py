@@ -40,6 +40,7 @@ class ScreenshotRequest:
     timeout: int | None = None
     viewport_width: int | None = None
     viewport_height: int | None = None
+    font_css: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ScreenshotRequest:
@@ -51,6 +52,7 @@ class ScreenshotRequest:
             timeout=data.get("timeout"),
             viewport_width=data.get("viewport_width"),
             viewport_height=data.get("viewport_height"),
+            font_css=data.get("font_css"),
         )
 
 

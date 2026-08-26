@@ -56,6 +56,10 @@ def main() -> None:
     app = create_app()
 
     async def run_server() -> None:
+        if settings.fonts:
+            from veilrender.fonts import ensure_fonts
+
+            await asyncio.to_thread(ensure_fonts, settings.fonts)
         await browser_manager.start()
         await storage_manager.ensure_bucket()
 

@@ -62,6 +62,18 @@ class Settings:
             os.environ.get("VEILRENDER_WORKER_HEALTH_INTERVAL", "10")
         )
 
+        # Font download
+        _fonts_raw = os.environ.get("VEILRENDER_FONTS", "")
+        self.fonts: list[str] = (
+            [f.strip() for f in _fonts_raw.split(",") if f.strip()]
+            if _fonts_raw
+            else []
+        )
+        self.font_dir: str = os.environ.get(
+            "VEILRENDER_FONT_DIR", os.path.expanduser("~/.fonts")
+        )
+        self.font_mirror: str = os.environ.get("VEILRENDER_FONT_MIRROR", "")
+
         self.resource_filter: bool = (
             os.environ.get("VEILRENDER_RESOURCE_FILTER", "true").lower() == "true"
         )
