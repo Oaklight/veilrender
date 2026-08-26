@@ -74,7 +74,7 @@ def _download_font(filename: str) -> Path | None:
 def register(app: App) -> None:
     """Register font serving route on the app."""
 
-    @app.get("/fonts/{filename}")
+    @app.get("/fonts/<path:filename>")
     async def serve_font(request: Request) -> Response:
         filename = request.path_params.get("filename", "")
         if not filename or "/" in filename or "\\" in filename:
