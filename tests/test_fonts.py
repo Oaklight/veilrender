@@ -43,11 +43,13 @@ def test_dedup():
 
 
 def test_mixed():
-    entries = _resolve_entries([
-        "noto-color-emoji",
-        "cjk",
-        "https://example.com/Custom.woff2",
-    ])
+    entries = _resolve_entries(
+        [
+            "noto-color-emoji",
+            "cjk",
+            "https://example.com/Custom.woff2",
+        ]
+    )
     names = [e[0] for e in entries]
     assert "noto-color-emoji.ttf" in names
     assert "noto-sans-sc.ttf" in names
