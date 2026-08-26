@@ -75,8 +75,7 @@ def register(app: App) -> None:
     """Register font serving route on the app."""
 
     @app.get("/fonts/<path:filename>")
-    async def serve_font(request: Request) -> Response:
-        filename = request.path_params.get("filename", "")
+    async def serve_font(request: Request, filename: str = "") -> Response:
         if not filename or "/" in filename or "\\" in filename:
             return Response(
                 body=b'{"error": "Invalid filename"}',
