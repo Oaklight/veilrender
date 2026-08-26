@@ -1,4 +1,4 @@
-"""On-demand font download for screenshot i18n support."""
+"""On-demand font download and auto-detection for screenshot i18n support."""
 
 from __future__ import annotations
 
@@ -111,3 +111,81 @@ def ensure_fonts(font_specs: list[str]) -> None:
             logger.debug("fc-cache failed", exc_info=True)
     else:
         logger.info("All %d font(s) already present", len(entries))
+
+
+# ── Auto-detection: probe local fonts, generate CSS for missing ones ─────
+
+# Map fc-list language tags to jsDelivr @fontsource CSS URLs
+_FONTSOURCE = "https://cdn.jsdelivr.net/npm/@fontsource"
+_LANG_TO_CSS: dict[str, str] = {
+    "zh-cn": f"{_FONTSOURCE}/noto-sans-sc/index.css",
+    "zh-tw": f"{_FONTSOURCE}/noto-sans-tc/index.css",
+    "ja": f"{_FONTSOURCE}/noto-sans-jp/index.css",
+    "ko": f"{_FONTSOURCE}/noto-sans-kr/index.css",
+    "ar": f"{_FONTSOURCE}/noto-sans-arabic/index.css",
+    "th": f"{_FONTSOURCE}/noto-sans-thai/index.css",
+    "hi": f"{_FONTSOURCE}/noto-sans-devanagari/index.css",
+}
+
+_auto_css_url: str | None = None
+_auto_detected = False
+
+
+def _detect_missing_fonts() -> list[str]:
+    """Probe local font coverage via fc-list, return CSS URLs for missing scripts."""
+    missing: list[str] = []
+    try:
+        result = subprocess.run(
+            ["fc-list", "--format", "%{lang}\n"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        installed_langs = set(result.stdout.lower().split())
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        installed_langs = set()
+
+    for lang, css_url in _LANG_TO_CSS.items():
+        if lang not in installed_langs:
+            missing.append(css_url)
+
+    return missing
+
+
+_auto_css_urls: list[str] | None = None
+_auto_detected = False
+
+
+def get_auto_font_css_urls() -> list[str]:
+    """Return CSS URLs for missing local fonts.
+
+    Result is cached after first call. Override with ``VEILRENDER_FONT_CSS``
+    env var (comma-separated URLs) or per-request ``font_css`` parameter.
+    """
+    global _auto_css_urls, _auto_detected
+
+    if _auto_detected:
+        return _auto_css_urls or []
+
+    _auto_detected = True
+
+    explicit = settings.font_css
+    if explicit:
+        _auto_css_urls = [u.strip() for u in explicit.split(",") if u.strip()]
+        logger.info(
+            "Using explicit VEILRENDER_FONT_CSS: %d URL(s)", len(_auto_css_urls)
+        )
+        return _auto_css_urls
+
+    missing = _detect_missing_fonts()
+    if not missing:
+        logger.info("All font scripts detected locally, no CSS injection needed")
+        _auto_css_urls = []
+        return []
+
+    _auto_css_urls = missing
+    logger.info(
+        "Auto-detected %d missing font scripts, will inject CSS on screenshots",
+        len(missing),
+    )
+    return _auto_css_urls
