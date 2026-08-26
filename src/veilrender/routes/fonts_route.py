@@ -44,9 +44,16 @@ def _find_font(filename: str) -> Path | None:
     """Search font directories for a file by name."""
     font_dir = Path(settings.font_dir)
     for search_dir in [font_dir, *_FONT_DIRS]:
-        for path in search_dir.rglob(filename):
-            if path.is_file():
-                return path
+        if not search_dir.exists():
+            continue
+        candidate = search_dir / filename
+        if candidate.is_file():
+            return candidate
+        for path in search_dir.iterdir():
+            if path.is_dir():
+                candidate = path / filename
+                if candidate.is_file():
+                    return candidate
     return None
 
 
