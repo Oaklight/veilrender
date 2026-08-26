@@ -10,7 +10,7 @@ from veilrender import stats
 from veilrender.auth import verify_token
 from veilrender.browser import browser_manager
 from veilrender.config import settings
-from veilrender.fonts import get_auto_font_css_urls
+from veilrender.fonts import get_auto_font_css_urls, get_emoji_font_css
 from veilrender.models import ScreenshotRequest
 from veilrender.url_validator import URLValidationError, validate_url
 
@@ -67,9 +67,13 @@ def register(app: App) -> None:
                     timeout=timeout,
                 )
                 css_urls = [req.font_css] if req.font_css else get_auto_font_css_urls()
+                host = request.headers.get("host", "")
+                emoji_css = get_emoji_font_css(host)
                 for css_url in css_urls:
                     await page.add_style_tag(url=css_url)
-                if css_urls:
+                if emoji_css:
+                    await page.add_style_tag(content=emoji_css)
+                if css_urls or emoji_css:
                     await page.evaluate("() => document.fonts.ready")
                 png_bytes = await page.screenshot(full_page=req.full_page)
         except Exception as exc:

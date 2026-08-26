@@ -21,7 +21,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libasound2t64 \
         libdbus-1-3 \
         fonts-liberation \
-        fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd -m -u 1000 user || true
