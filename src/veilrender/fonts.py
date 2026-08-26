@@ -82,12 +82,15 @@ def ensure_fonts(font_specs: list[str]) -> None:
             logger.debug("Font already present: %s", dest)
             continue
 
+        # Proxy-style mirror: prefixes the full URL, e.g.
+        # VEILRENDER_FONT_MIRROR=https://ghfast.top → ghfast.top/https://cdn.jsdelivr.net/...
         if settings.font_mirror:
             url = f"{settings.font_mirror}/{url}"
 
         logger.info("Downloading font: %s", filename)
         try:
-            urllib.request.urlretrieve(url, str(dest))
+            resp = urllib.request.urlopen(url, timeout=60)
+            dest.write_bytes(resp.read())
             downloaded += 1
         except Exception:
             logger.warning(

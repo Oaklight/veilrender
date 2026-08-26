@@ -67,7 +67,7 @@ def register(app: App) -> None:
                 )
                 if req.font_css:
                     await page.add_style_tag(url=req.font_css)
-                    await page.wait_for_timeout(500)
+                    await page.evaluate("() => document.fonts.ready")
                 png_bytes = await page.screenshot(full_page=req.full_page)
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
