@@ -7,6 +7,7 @@ permanently in ``~/.fonts/`` for future requests.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 import urllib.request
@@ -55,6 +56,8 @@ def _download_font(filename: str) -> Path | None:
     if not url:
         return None
 
+    # Proxy-style mirror: prefixes the full URL, e.g.
+    # VEILRENDER_FONT_MIRROR=https://ghfast.top → ghfast.top/https://cdn.jsdelivr.net/...
     if settings.font_mirror:
         url = f"{settings.font_mirror}/{url}"
 
@@ -62,10 +65,15 @@ def _download_font(filename: str) -> Path | None:
     font_dir.mkdir(parents=True, exist_ok=True)
     dest = font_dir / filename
 
+    if dest.exists():
+        return dest
+
     logger.info("On-demand font download: %s", filename)
     try:
         resp = urllib.request.urlopen(url, timeout=60)
-        dest.write_bytes(resp.read())
+        tmp = dest.with_suffix(".tmp")
+        tmp.write_bytes(resp.read())
+        tmp.rename(dest)
         try:
             subprocess.run(
                 ["fc-cache", "-f", str(font_dir)], capture_output=True, timeout=10
@@ -93,7 +101,7 @@ def register(app: App) -> None:
         path = _find_font(filename)
 
         if path is None:
-            path = _download_font(filename)
+            path = await asyncio.to_thread(_download_font, filename)
 
         if path is None:
             return Response(
