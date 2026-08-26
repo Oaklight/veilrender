@@ -127,8 +127,9 @@ _LANG_TO_CSS: dict[str, str] = {
     "hi": f"{_FONTSOURCE}/noto-sans-devanagari/index.css",
 }
 
-_auto_css_url: str | None = None
+_auto_css_urls: list[str] | None = None
 _auto_detected = False
+_needs_emoji_serving = False
 
 
 def _detect_missing_fonts() -> list[str]:
@@ -152,17 +153,30 @@ def _detect_missing_fonts() -> list[str]:
     return missing
 
 
-_auto_css_urls: list[str] | None = None
-_auto_detected = False
+def _has_local_emoji() -> bool:
+    """Check if a color emoji font is available locally."""
+    try:
+        result = subprocess.run(
+            ["fc-list", "--format", "%{family}\n"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return "emoji" in result.stdout.lower()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 def get_auto_font_css_urls() -> list[str]:
     """Return CSS URLs for missing local fonts.
 
+    For CJK/Arabic/Thai/Hindi: jsDelivr @fontsource CSS URLs.
+    For emoji: needs gateway font serving (CSS injection doesn't work).
+
     Result is cached after first call. Override with ``VEILRENDER_FONT_CSS``
     env var (comma-separated URLs) or per-request ``font_css`` parameter.
     """
-    global _auto_css_urls, _auto_detected
+    global _auto_css_urls, _auto_detected, _needs_emoji_serving
 
     if _auto_detected:
         return _auto_css_urls or []
@@ -178,14 +192,38 @@ def get_auto_font_css_urls() -> list[str]:
         return _auto_css_urls
 
     missing = _detect_missing_fonts()
-    if not missing:
+    _needs_emoji_serving = not _has_local_emoji()
+
+    if not missing and not _needs_emoji_serving:
         logger.info("All font scripts detected locally, no CSS injection needed")
         _auto_css_urls = []
         return []
 
     _auto_css_urls = missing
     logger.info(
-        "Auto-detected %d missing font scripts, will inject CSS on screenshots",
+        "Auto-detected %d missing font scripts%s, will inject CSS on screenshots",
         len(missing),
+        " + emoji via gateway serving" if _needs_emoji_serving else "",
     )
     return _auto_css_urls
+
+
+def get_emoji_font_css(host: str) -> str | None:
+    """Return inline @font-face CSS for emoji, served from gateway.
+
+    Args:
+        host: The gateway's Host header (e.g. ``localhost:7860``).
+
+    Returns:
+        Inline CSS string, or None if emoji font is available locally.
+    """
+    get_auto_font_css_urls()
+    if not _needs_emoji_serving:
+        return None
+    scheme = "https" if host.endswith(":443") else "http"
+    return (
+        "@font-face { "
+        "font-family: 'Noto Color Emoji'; "
+        f"src: url({scheme}://{host}/fonts/NotoColorEmoji.ttf); "
+        "}"
+    )
