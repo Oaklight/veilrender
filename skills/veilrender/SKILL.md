@@ -1,7 +1,7 @@
 ---
 name: veilrender
-version: 0.4.0
-description: "Render JavaScript-heavy pages via VeilRender API: fetch fully rendered HTML, Markdown, readability text, or PNG screenshots from URLs that fail with plain HTTP fetch."
+version: 0.5.0
+description: "Render JavaScript-heavy pages via VeilRender API: fetch fully rendered HTML, Markdown, readability text, or PNG/JPEG screenshots from URLs that fail with plain HTTP fetch."
 homepage: https://github.com/Oaklight/veilrender
 metadata:
   {
@@ -140,13 +140,32 @@ curl -s -X POST "$VEILRENDER_URL/render" \
 
 ## Take a screenshot
 
-Returns a PNG image of the rendered page.
+Returns a PNG or JPEG image of the rendered page.
 
 ```bash
+# Default PNG screenshot
 curl -s -X POST "$VEILRENDER_URL/screenshot" \
   -H "Authorization: Bearer $VEILRENDER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}' -o screenshot.png
+
+# JPEG with quality control
+curl -s -X POST "$VEILRENDER_URL/screenshot" \
+  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "format": "jpeg", "quality": 80}' -o screenshot.jpg
+
+# Element screenshot
+curl -s -X POST "$VEILRENDER_URL/screenshot" \
+  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "selector": "#main-content"}' -o element.png
+
+# Dark mode, retina scale
+curl -s -X POST "$VEILRENDER_URL/screenshot" \
+  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "color_scheme": "dark", "scale": 2}' -o dark-retina.png
 ```
 
 ### Screenshot options
@@ -154,7 +173,15 @@ curl -s -X POST "$VEILRENDER_URL/screenshot" \
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `url` | string | *(required)* | URL to screenshot |
+| `format` | string | `"png"` | Image format: `png`, `jpeg` |
+| `quality` | int | — | JPEG quality 0–100 (only for `jpeg`) |
 | `full_page` | bool | `false` | Capture full scrollable page |
+| `scale` | float | — | Device pixel ratio (e.g. `2` for retina, max `8`) |
+| `selector` | string | — | CSS selector to screenshot a specific element |
+| `clip` | object | — | Region: `{"x": N, "y": N, "width": N, "height": N}` |
+| `color_scheme` | string | — | `"light"`, `"dark"`, or `"no-preference"` |
+| `wait_for` | string | — | CSS selector to wait for before capture |
+| `transparent` | bool | `false` | Transparent background (PNG only) |
 | `viewport_width` | int | `1280` | Override viewport width |
 | `viewport_height` | int | `720` | Override viewport height |
 
