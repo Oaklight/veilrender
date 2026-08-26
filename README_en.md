@@ -18,7 +18,7 @@ VeilRender accepts a URL and returns the fully rendered page content (HTML, Mark
 
 - **Stealth rendering** — [CloakBrowser](https://github.com/CloakHQ/CloakBrowser) (71 C++ fingerprint patches) + [Patchright](https://github.com/AhmedKhaledp-0/patchright-python) (stealth Playwright fork)
 - **Multiple output formats** — raw HTML, Markdown, readability-extracted article text
-- **Screenshot capture** — full-page or viewport PNG
+- **Screenshot capture** — full-page, viewport, or element; PNG or JPEG with quality/scale control
 - **Horizontal scaling** — gateway + remote browser worker pool with health checks and auto-reconnection
 - **Mixed browser backends** — Chromium (CDP) and Firefox/Camoufox (Playwright protocol) in the same pool
 - **Prometheus metrics** — `/metrics` endpoint with latency percentiles, per-worker gauges
@@ -93,13 +93,47 @@ Request body:
 
 ### POST /screenshot
 
-Capture a PNG screenshot.
+Capture a screenshot (PNG or JPEG).
+
+Request body:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | *(required)* | URL to capture |
+| `format` | string | `"png"` | Image format: `png`, `jpeg` |
+| `quality` | int | — | JPEG quality 0–100 (only for `jpeg`) |
+| `full_page` | bool | `false` | Capture the full scrollable page |
+| `scale` | float | — | Device pixel ratio (e.g. `2` for retina) |
+| `selector` | string | — | CSS selector to screenshot a specific element |
+| `clip` | object | — | Region to capture: `{"x", "y", "width", "height"}` |
+| `color_scheme` | string | — | `"light"`, `"dark"`, or `"no-preference"` |
+| `wait_for` | string | — | CSS selector to wait for before capture |
+| `transparent` | bool | `false` | Transparent background (PNG only) |
+| `wait_until` | string | `"networkidle"` | Playwright wait strategy |
+| `timeout` | int | — | Timeout in ms |
+| `viewport_width` | int | — | Viewport width in px |
+| `viewport_height` | int | — | Viewport height in px |
 
 ```bash
+# Default PNG screenshot
 curl -X POST http://localhost:7860/screenshot \
   -H "Authorization: Bearer your-secret" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}' -o screenshot.png
+
+# JPEG with quality
+curl -X POST http://localhost:7860/screenshot \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "format": "jpeg", "quality": 80}' \
+  -o screenshot.jpg
+
+# Element screenshot
+curl -X POST http://localhost:7860/screenshot \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "selector": "#main-content"}' \
+  -o element.png
 ```
 
 ### GET /metrics

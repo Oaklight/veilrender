@@ -18,7 +18,7 @@ VeilRender 接受一个 URL，使用反检测 Chromium 浏览器返回完整渲�
 
 - **反检测渲染** —— [CloakBrowser](https://github.com/CloakHQ/CloakBrowser)（71 项 C++ 指纹补丁）+ [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-python)（Playwright 反检测分支）
 - **多种输出格式** —— 原始 HTML、Markdown、readability 提取的正文
-- **截图功能** —— 全页或视口 PNG 截图
+- **截图功能** —— 全页、视口或元素截图；支持 PNG/JPEG 格式及质量/缩放控制
 - **水平扩展** —— 网关 + 远程浏览器工作节点池，支持健康检查和自动重连
 - **混合浏览器后端** —— Chromium（CDP）和 Firefox/Camoufox（Playwright 协议）可在同一池中共存
 - **Prometheus 指标** —— `/metrics` 端点提供延迟百分位、每工作节点状态指标
@@ -93,13 +93,47 @@ curl -X POST http://localhost:7860/render \
 
 ### POST /screenshot
 
-捕获 PNG 截图。
+捕获截图（PNG 或 JPEG）。
+
+请求体：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `url` | string | *（必填）* | 要截图的 URL |
+| `format` | string | `"png"` | 图片格式：`png`、`jpeg` |
+| `quality` | int | — | JPEG 质量 0–100（仅 `jpeg` 格式） |
+| `full_page` | bool | `false` | 捕获完整可滚动页面 |
+| `scale` | float | — | 设备像素比（如 `2` 表示 Retina） |
+| `selector` | string | — | CSS 选择器，截取特定元素 |
+| `clip` | object | — | 截取区域：`{"x", "y", "width", "height"}` |
+| `color_scheme` | string | — | `"light"`、`"dark"` 或 `"no-preference"` |
+| `wait_for` | string | — | 截图前等待的 CSS 选择器 |
+| `transparent` | bool | `false` | 透明背景（仅 PNG） |
+| `wait_until` | string | `"networkidle"` | Playwright 等待策略 |
+| `timeout` | int | — | 超时时间（毫秒） |
+| `viewport_width` | int | — | 视口宽度（像素） |
+| `viewport_height` | int | — | 视口高度（像素） |
 
 ```bash
+# 默认 PNG 截图
 curl -X POST http://localhost:7860/screenshot \
   -H "Authorization: Bearer your-secret" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}' -o screenshot.png
+
+# JPEG 格式并指定质量
+curl -X POST http://localhost:7860/screenshot \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "format": "jpeg", "quality": 80}' \
+  -o screenshot.jpg
+
+# 元素截图
+curl -X POST http://localhost:7860/screenshot \
+  -H "Authorization: Bearer your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "selector": "#main-content"}' \
+  -o element.png
 ```
 
 ### GET /metrics
