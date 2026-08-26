@@ -218,11 +218,13 @@ def get_auto_font_css_urls() -> list[str]:
     return _auto_css_urls
 
 
-def get_emoji_font_css(host: str) -> str | None:
+def get_emoji_font_css(host: str, forwarded_proto: str = "") -> str | None:
     """Return inline @font-face CSS for emoji, served from gateway.
 
     Args:
         host: The gateway's Host header (e.g. ``localhost:7860``).
+        forwarded_proto: Value of ``X-Forwarded-Proto`` header, if behind
+            a reverse proxy. Falls back to port-based heuristic.
 
     Returns:
         Inline CSS string, or None if emoji font is available locally.
@@ -230,7 +232,10 @@ def get_emoji_font_css(host: str) -> str | None:
     get_auto_font_css_urls()
     if not _needs_emoji_serving:
         return None
-    scheme = "https" if host.endswith(":443") else "http"
+    if forwarded_proto:
+        scheme = forwarded_proto
+    else:
+        scheme = "https" if host.endswith(":443") else "http"
     return (
         "@font-face { "
         "font-family: 'Noto Color Emoji'; "

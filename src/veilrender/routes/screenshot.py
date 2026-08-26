@@ -68,7 +68,8 @@ def register(app: App) -> None:
                 )
                 css_urls = [req.font_css] if req.font_css else get_auto_font_css_urls()
                 host = request.headers.get("host", "")
-                emoji_css = get_emoji_font_css(host)
+                proto = request.headers.get("x-forwarded-proto", "")
+                emoji_css = get_emoji_font_css(host, proto)
                 for css_url in css_urls:
                     await page.add_style_tag(url=css_url)
                 if emoji_css:
