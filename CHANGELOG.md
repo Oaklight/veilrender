@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-09
+
+### Changed
+
+- Bump vendored httpserver 0.2.1→0.4.0: adds lifespan hooks, cookie support, `State` namespace, `StreamingResponse` background callbacks, thread-safe shutdown ([#38])
+- Refactor browser lifecycle to use `@app.on_startup` / `@app.on_shutdown` lifespan hooks instead of manual management in server loop ([#39], [#40])
+
 ## [0.5.0] - 2026-08-26
 
 ### Added
@@ -148,7 +155,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Oaklight/veilrender/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/Oaklight/veilrender/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Oaklight/veilrender/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Oaklight/veilrender/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Oaklight/veilrender/compare/v0.3.0...v0.3.1
@@ -181,3 +190,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#27]: https://github.com/Oaklight/veilrender/pull/27
 [#29]: https://github.com/Oaklight/veilrender/issues/29
 [#30]: https://github.com/Oaklight/veilrender/issues/30
+[#38]: https://github.com/Oaklight/veilrender/pull/38
+[#39]: https://github.com/Oaklight/veilrender/issues/39
+[#40]: https://github.com/Oaklight/veilrender/pull/40
