@@ -56,6 +56,23 @@ def create_app() -> App:
     render.register(app)
     screenshot.register(app)
 
+    # Lifespan hooks — run by the custom server loop in main()
+    @app.on_startup
+    async def _startup() -> None:
+        from veilrender.fonts import ensure_fonts, has_local_emoji
+
+        if settings.fonts:
+            await asyncio.to_thread(ensure_fonts, settings.fonts)
+        if not has_local_emoji():
+            logger.info("Emoji font not found, downloading before browser start...")
+            await asyncio.to_thread(ensure_fonts, ["noto-color-emoji"])
+        await browser_manager.start()
+        await storage_manager.ensure_bucket()
+
+    @app.on_shutdown
+    async def _shutdown() -> None:
+        await browser_manager.stop()
+
     return app
 
 
@@ -64,17 +81,7 @@ def main() -> None:
     app = create_app()
 
     async def run_server() -> None:
-        from veilrender.fonts import ensure_fonts, has_local_emoji
-
-        # Download user-requested fonts
-        if settings.fonts:
-            await asyncio.to_thread(ensure_fonts, settings.fonts)
-        # Auto-download emoji if missing (must happen before browser starts)
-        if not has_local_emoji():
-            logger.info("Emoji font not found, downloading before browser start...")
-            await asyncio.to_thread(ensure_fonts, ["noto-color-emoji"])
-        await browser_manager.start()
-        await storage_manager.ensure_bucket()
+        await app._run_startup_hooks()
 
         shutdown_event = asyncio.Event()
 
@@ -184,7 +191,7 @@ def main() -> None:
             async with server:
                 await shutdown_event.wait()
         finally:
-            await browser_manager.stop()
+            await app._run_shutdown_hooks()
 
     try:
         asyncio.run(run_server())
