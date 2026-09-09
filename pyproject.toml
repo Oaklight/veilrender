@@ -60,3 +60,6 @@ exclude = ["src/veilrender/_vendor/**"]
 
 [tool.ty.rules]
 unresolved-import = "ignore"
+
+[tool.zerodep]
+vendor-dir = "src/veilrender/_vendor"
