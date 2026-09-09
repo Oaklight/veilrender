@@ -63,6 +63,7 @@ def create_app() -> App:
 
         if settings.fonts:
             await asyncio.to_thread(ensure_fonts, settings.fonts)
+        # Emoji must be downloaded before browser starts
         if not has_local_emoji():
             logger.info("Emoji font not found, downloading before browser start...")
             await asyncio.to_thread(ensure_fonts, ["noto-color-emoji"])
@@ -81,6 +82,7 @@ def main() -> None:
     app = create_app()
 
     async def run_server() -> None:
+        # Private API — we bypass app.run() for CDP WebSocket multiplexing
         await app._run_startup_hooks()
 
         shutdown_event = asyncio.Event()
@@ -191,7 +193,7 @@ def main() -> None:
             async with server:
                 await shutdown_event.wait()
         finally:
-            await app._run_shutdown_hooks()
+            await app._run_shutdown_hooks()  # see startup comment above
 
     try:
         asyncio.run(run_server())
