@@ -1,9 +1,9 @@
 # /// zerodep
-# version = "0.2.1"
+# version = "0.4.0"
 # deps = []
 # tier = "subsystem"
 # category = "network"
-# note = "Install/update via: https://zerodep.readthedocs.io/en/latest/guide/cli/"
+# note = "Install/update via `zerodep add httpserver`"
 # ///
 
 """Zero-dependency async HTTP server with decorator-based routing.
@@ -48,6 +48,7 @@ import signal
 import sys
 from collections.abc import AsyncIterator, Callable
 from email.utils import formatdate
+from http.cookies import CookieError, SimpleCookie
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -61,6 +62,7 @@ __all__ = [
     "JSONResponse",
     "StreamingResponse",
     "FileResponse",
+    "State",
     # Exceptions
     "HTTPException",
     # Utilities
@@ -156,6 +158,35 @@ def abort(status_code: int, message: str | None = None) -> None:
     raise HTTPException(status_code, message)
 
 
+# ── Request State ────────────────────────────────────────────────────────────
+
+
+class State:
+    """Mutable namespace for storing arbitrary per-request data.
+
+    Middleware and handlers can attach attributes freely::
+
+        @app.before_request
+        async def start_timer(req):
+            req.state.start_time = time.monotonic()
+
+    Uses ``__dict__``-based attribute access (no ``__slots__``), following
+    the same pattern as Starlette's ``State``.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.__dict__.update(kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, State):
+            return NotImplemented
+        return self.__dict__ == other.__dict__
+
+    def __repr__(self) -> str:
+        items = ", ".join(f"{k}={v!r}" for k, v in self.__dict__.items())
+        return f"State({items})"
+
+
 # ── Request ──────────────────────────────────────────────────────────────────
 
 
@@ -172,6 +203,7 @@ class Request:
         path_params: Parameters extracted from the route pattern.
         client_addr: Client ``(host, port)`` tuple.
         app: Reference to the :class:`App` instance handling this request.
+        state: Per-request :class:`State` namespace for arbitrary data.
     """
 
     __slots__ = (
@@ -184,7 +216,9 @@ class Request:
         "path_params",
         "client_addr",
         "app",
+        "state",
         "_json",
+        "_cookies",
     )
 
     def __init__(
@@ -206,7 +240,26 @@ class Request:
         self.path_params: dict[str, Any] = {}
         self.client_addr = client_addr
         self.app = app
+        self.state = State()
         self._json: Any = _SENTINEL
+        self._cookies: Any = _SENTINEL
+
+    @property
+    def cookies(self) -> dict[str, str]:
+        """Parse the Cookie request header into a ``{name: value}`` dict."""
+        if self._cookies is _SENTINEL:
+            raw = self.headers.get("cookie", "")
+            if raw:
+                sc = SimpleCookie()
+                try:
+                    sc.load(raw)
+                except CookieError:
+                    self._cookies = {}
+                else:
+                    self._cookies = {k: m.value for k, m in sc.items()}
+            else:
+                self._cookies = {}
+        return self._cookies
 
     def json(self) -> Any:
         """Parse body as JSON (cached)."""
@@ -226,6 +279,87 @@ class Request:
 # ── Response Classes ─────────────────────────────────────────────────────────
 
 
+def _build_set_cookie(
+    name: str,
+    value: str = "",
+    *,
+    max_age: int | None = None,
+    expires: str | None = None,
+    path: str | None = None,
+    domain: str | None = None,
+    secure: bool = False,
+    httponly: bool = False,
+    samesite: str | None = None,
+) -> str:
+    """Build a Set-Cookie header value string."""
+    sc = SimpleCookie()
+    sc[name] = value
+    morsel = sc[name]
+    if max_age is not None:
+        morsel["max-age"] = str(max_age)
+    if expires is not None:
+        morsel["expires"] = expires
+    if path is not None:
+        morsel["path"] = path
+    if domain is not None:
+        morsel["domain"] = domain
+    if secure:
+        morsel["secure"] = True
+    if httponly:
+        morsel["httponly"] = True
+    if samesite is not None:
+        morsel["samesite"] = samesite
+    return morsel.OutputString()
+
+
+def _append_set_cookie(
+    cookie_headers: list[str],
+    name: str,
+    value: str = "",
+    *,
+    max_age: int | None = None,
+    expires: str | None = None,
+    path: str | None = None,
+    domain: str | None = None,
+    secure: bool = False,
+    httponly: bool = False,
+    samesite: str | None = None,
+) -> None:
+    """Append a Set-Cookie header value to the list."""
+    cookie_headers.append(
+        _build_set_cookie(
+            name,
+            value,
+            max_age=max_age,
+            expires=expires,
+            path=path,
+            domain=domain,
+            secure=secure,
+            httponly=httponly,
+            samesite=samesite,
+        )
+    )
+
+
+def _append_delete_cookie(
+    cookie_headers: list[str],
+    name: str,
+    *,
+    path: str | None = None,
+    domain: str | None = None,
+) -> None:
+    """Append a Set-Cookie header that expires the named cookie."""
+    _append_set_cookie(
+        cookie_headers,
+        name,
+        value="",
+        max_age=0,
+        expires="Thu, 01 Jan 1970 00:00:00 GMT",
+        path=path,
+        domain=domain,
+    )
+
+
 class Response:
     """HTTP response with a fixed body.
 
@@ -236,7 +370,7 @@ class Response:
         content_type: Shorthand for ``Content-Type`` header.
     """
 
-    __slots__ = ("status_code", "headers", "body")
+    __slots__ = ("status_code", "headers", "body", "_cookie_headers")
 
     def __init__(
         self,
@@ -253,6 +387,67 @@ class Response:
             self.body = body
         if content_type is not None:
             self.headers["Content-Type"] = content_type
+        self._cookie_headers: list[str] = []
+
+    def set_cookie(
+        self,
+        name: str,
+        value: str = "",
+        *,
+        max_age: int | None = None,
+        expires: str | None = None,
+        path: str | None = None,
+        domain: str | None = None,
+        secure: bool = False,
+        httponly: bool = False,
+        samesite: str | None = None,
+    ) -> None:
+        """Append a Set-Cookie header to the response.
+
+        Args:
+            name: Cookie name.
+            value: Cookie value.
+            max_age: Max age in seconds.
+            expires: Expiry date string (HTTP date format).
+            path: Cookie path scope.
+            domain: Cookie domain scope.
+            secure: Restrict to HTTPS.
+            httponly: Restrict to HTTP (no JavaScript access).
+            samesite: SameSite attribute (``"Strict"``, ``"Lax"``, or ``"None"``).
+        """
+        _append_set_cookie(
+            self._cookie_headers,
+            name,
+            value,
+            max_age=max_age,
+            expires=expires,
+            path=path,
+            domain=domain,
+            secure=secure,
+            httponly=httponly,
+            samesite=samesite,
+        )
+
+    def delete_cookie(
+        self,
+        name: str,
+        *,
+        path: str | None = None,
+        domain: str | None = None,
+    ) -> None:
+        """Append a Set-Cookie header that expires the named cookie.
+
+        Args:
+            name: Cookie name to delete.
+            path: Must match the path used when the cookie was set.
+            domain: Must match the domain used when the cookie was set.
+        """
+        _append_delete_cookie(
+            self._cookie_headers,
+            name,
+            path=path,
+            domain=domain,
+        )
 
     async def _write(self, writer: asyncio.StreamWriter) -> None:
         """Serialize and write the full HTTP response."""
@@ -266,6 +461,8 @@ class Response:
         buf.extend(f"HTTP/1.1 {self.status_code} {reason}\r\n".encode("latin-1"))
         for k, v in self.headers.items():
             buf.extend(f"{k}: {v}\r\n".encode("latin-1"))
+        for cookie_line in self._cookie_headers:
+            buf.extend(f"Set-Cookie: {cookie_line}\r\n".encode("latin-1"))
         buf.extend(b"\r\n")
         buf.extend(self.body)
         writer.write(bytes(buf))
@@ -309,9 +506,19 @@ class StreamingResponse:
         status_code: HTTP status code.
         headers: Extra response headers.
         content_type: MIME type (default ``application/octet-stream``).
+        background: Optional callable invoked after the stream completes
+            (including client disconnect).  Accepts both sync and async
+            callables.  Exceptions are logged and suppressed.
     """
 
-    __slots__ = ("_generator", "status_code", "headers", "content_type")
+    __slots__ = (
+        "_generator",
+        "status_code",
+        "headers",
+        "content_type",
+        "background",
+        "_cookie_headers",
+    )
 
     def __init__(
         self,
@@ -319,11 +526,56 @@ class StreamingResponse:
         status_code: int = 200,
         headers: dict[str, str] | None = None,
         content_type: str = "application/octet-stream",
+        background: Callable[[], Any] | None = None,
     ):
         self._generator = generator
         self.status_code = status_code
         self.headers: dict[str, str] = headers.copy() if headers else {}
         self.content_type = content_type
+        self.background = background
+        self._cookie_headers: list[str] = []
+
+    def set_cookie(
+        self,
+        name: str,
+        value: str = "",
+        *,
+        max_age: int | None = None,
+        expires: str | None = None,
+        path: str | None = None,
+        domain: str | None = None,
+        secure: bool = False,
+        httponly: bool = False,
+        samesite: str | None = None,
+    ) -> None:
+        """Append a Set-Cookie header to the response."""
+        _append_set_cookie(
+            self._cookie_headers,
+            name,
+            value,
+            max_age=max_age,
+            expires=expires,
+            path=path,
+            domain=domain,
+            secure=secure,
+            httponly=httponly,
+            samesite=samesite,
+        )
+
+    def delete_cookie(
+        self,
+        name: str,
+        *,
+        path: str | None = None,
+        domain: str | None = None,
+    ) -> None:
+        """Append a Set-Cookie header that expires the named cookie."""
+        _append_delete_cookie(
+            self._cookie_headers,
+            name,
+            path=path,
+            domain=domain,
+        )
 
     async def _write(self, writer: asyncio.StreamWriter) -> None:
         """Write status line, headers, then stream the body."""
@@ -341,6 +593,8 @@ class StreamingResponse:
         buf.extend(f"HTTP/1.1 {self.status_code} {reason}\r\n".encode("latin-1"))
         for k, v in self.headers.items():
             buf.extend(f"{k}: {v}\r\n".encode("latin-1"))
+        for cookie_line in self._cookie_headers:
+            buf.extend(f"Set-Cookie: {cookie_line}\r\n".encode("latin-1"))
         buf.extend(b"\r\n")
         writer.write(bytes(buf))
         await writer.drain()
@@ -360,7 +614,17 @@ class StreamingResponse:
         finally:
             aclose = getattr(self._generator, "aclose", None)
             if aclose is not None:
-                await aclose()
+                try:
+                    await aclose()
+                except Exception:
+                    logger.debug("Generator aclose failed", exc_info=True)
+            if self.background is not None:
+                try:
+                    result = self.background()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception:
+                    logger.warning("Background callback failed", exc_info=True)
 
 
 class FileResponse(Response):
@@ -636,9 +900,12 @@ class App:
         self._static_routes: list[tuple[str, str]] = []
         self._before_request_handlers: list[Callable[..., Any]] = []
         self._after_request_handlers: list[Callable[..., Any]] = []
+        self._startup_handlers: list[Callable[[], Any]] = []
+        self._shutdown_handlers: list[Callable[[], Any]] = []
         self._error_handlers: dict[int | type, Callable[..., Any]] = {}
         self._server: asyncio.Server | None = None
         self._shutdown_event: asyncio.Event | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self.max_body_size = max_body_size
         self.read_timeout = read_timeout
         self.port: int | None = None
@@ -752,6 +1019,46 @@ class App:
             return handler
 
         return decorator
+
+    # ── Lifespan Hooks ───────────────────────────────────────────────────
+
+    def on_startup(self, handler: Callable[[], Any]) -> Callable[[], Any]:
+        """Register a startup hook.
+
+        The hook is called (with no arguments) before the server starts
+        accepting connections.  Both sync and async callables are supported.
+        Hooks run in registration order.
+
+        If a startup hook raises, the error is logged and re-raised so the
+        server does not start with failed initialization.
+
+        Example::
+
+            @app.on_startup
+            async def init_pool():
+                app.pool = await create_pool()
+        """
+        self._startup_handlers.append(handler)
+        return handler
+
+    def on_shutdown(self, handler: Callable[[], Any]) -> Callable[[], Any]:
+        """Register a shutdown hook.
+
+        The hook is called (with no arguments) after the server stops
+        accepting connections.  Both sync and async callables are supported.
+        Hooks run in **reverse** registration order (LIFO).
+
+        If a shutdown hook raises, the error is logged and the remaining
+        hooks still execute (best-effort cleanup).
+
+        Example::
+
+            @app.on_shutdown
+            async def close_pool():
+                await app.pool.close()
+        """
+        self._shutdown_handlers.append(handler)
+        return handler
 
     # ── Request Dispatch ─────────────────────────────────────────────────
 
@@ -972,6 +1279,43 @@ class App:
 
     # ── Server Lifecycle ─────────────────────────────────────────────────
 
+    async def _run_startup_hooks(self) -> None:
+        """Run all registered startup hooks in registration order.
+
+        If any hook raises, the exception is logged and re-raised so the
+        server does not start with failed initialization.
+        """
+        for hook in self._startup_handlers:
+            try:
+                result = hook()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                logger.error(
+                    "Startup hook %r failed",
+                    getattr(hook, "__name__", repr(hook)),
+                    exc_info=True,
+                )
+                raise
+
+    async def _run_shutdown_hooks(self) -> None:
+        """Run all registered shutdown hooks in reverse registration order.
+
+        Errors are logged and suppressed so that remaining hooks still
+        execute (best-effort cleanup).
+        """
+        for hook in reversed(self._shutdown_handlers):
+            try:
+                result = hook()
+                if inspect.isawaitable(result):
+                    await result
+            except Exception:
+                logger.warning(
+                    "Shutdown hook %r failed",
+                    getattr(hook, "__name__", repr(hook)),
+                    exc_info=True,
+                )
+
     def run(
         self,
         host: str = DEFAULT_HOST,
@@ -998,33 +1342,43 @@ class App:
     async def _serve(self, host: str, port: int, *, socket: str | None = None) -> None:
         """Internal async server loop."""
         self._shutdown_event = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
         self._socket_path: str | None = None
 
-        if socket:
-            server = await self._start_unix_socket(socket)
-        else:
-            server = await asyncio.start_server(
-                self._handle_connection,
-                host,
-                port,
-            )
-            addrs = server.sockets[0].getsockname() if server.sockets else (host, port)
-            self.host = addrs[0]
-            self.port = addrs[1]
-            logger.info("Serving on %s:%d", self.host, self.port)
+        try:
+            # Run startup hooks before accepting connections
+            await self._run_startup_hooks()
 
-        self._server = server
+            if socket:
+                server = await self._start_unix_socket(socket)
+            else:
+                server = await asyncio.start_server(
+                    self._handle_connection,
+                    host,
+                    port,
+                )
+                addrs = (
+                    server.sockets[0].getsockname() if server.sockets else (host, port)
+                )
+                self.host = addrs[0]
+                self.port = addrs[1]
+                logger.info("Serving on %s:%d", self.host, self.port)
 
-        loop = asyncio.get_running_loop()
-        if sys.platform != "win32":
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, self._shutdown_event.set)
+            self._server = server
 
-        async with server:
-            await self._shutdown_event.wait()
-            logger.info("Shutting down server")
-            if self._socket_path:
-                self._cleanup_socket()
+            loop = asyncio.get_running_loop()
+            if sys.platform != "win32":
+                for sig in (signal.SIGINT, signal.SIGTERM):
+                    loop.add_signal_handler(sig, self._shutdown_event.set)
+
+            async with server:
+                await self._shutdown_event.wait()
+                logger.info("Shutting down server")
+                if self._socket_path:
+                    self._cleanup_socket()
+        finally:
+            # Run shutdown hooks after server stops accepting connections
+            await self._run_shutdown_hooks()
 
     async def _start_unix_socket(self, socket_path: str) -> asyncio.Server:
         """Start listening on a Unix domain socket.
@@ -1091,10 +1445,10 @@ class App:
     def shutdown(self) -> None:
         """Request a graceful server shutdown.
 
-        Safe to call from a request handler.
+        Safe to call from any thread or from a request handler.
         """
-        if self._shutdown_event is not None:
-            self._shutdown_event.set()
+        if self._shutdown_event is not None and self._loop is not None:
+            self._loop.call_soon_threadsafe(self._shutdown_event.set)
 
 
 # ── Handler Invocation ───────────────────────────────────────────────────────
