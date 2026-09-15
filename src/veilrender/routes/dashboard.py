@@ -121,7 +121,7 @@ async def _build_html() -> str:
         for t in tiers:
             cap = t["capacity"]
             act = t["active"]
-            util = (act / cap * 100) if cap > 0 else 0
+            util = min((act / cap * 100) if cap > 0 else 0, 100)
             svg = _capacity_ring(act, cap, util, prefix=f"ring-t{t['tier']}")
             ring_cards += f"""
         <div class="card ring-card">
@@ -540,7 +540,7 @@ async def _build_html() -> str:
 
   function updateRing(prefix, active, capacity) {{
     const cap = capacity || 0;
-    const u = cap > 0 ? active / cap * 100 : 0;
+    const u = Math.min(cap > 0 ? active / cap * 100 : 0, 100);
     const filled = CIRC * u / 100;
     const gap = CIRC - filled;
     const col = ringColor(u);
