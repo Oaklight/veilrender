@@ -96,17 +96,38 @@ def register(app: App) -> None:
                 return JSONResponse(cached)
             stats.render.cache_misses += 1
 
-        try:
-            async with browser_manager.get_page() as (ctx, page):
+        async def _do_render(*, min_tier: int = 0) -> tuple[int, str, str, str]:
+            async with browser_manager.get_page(min_tier=min_tier) as (ctx, page):
                 response = await page.goto(
                     req.url,
                     wait_until=req.wait_until,
                     timeout=timeout,
                 )
-                status_code = response.status if response else 0
-                title = await page.title()
-                final_url = page.url
-                html = await page.content()
+                sc = response.status if response else 0
+                t = await page.title()
+                fu = page.url
+                h = await page.content()
+                return sc, t, fu, h
+
+        try:
+            try:
+                status_code, title, final_url, html = await _do_render()
+            except Exception as first_exc:
+                current_tier = browser_manager.min_healthy_tier
+                if current_tier is not None and browser_manager.has_fallback_tier(
+                    current_tier
+                ):
+                    logger.warning(
+                        "Tier-%d render failed for %s: %s, retrying with fallback",
+                        current_tier,
+                        req.url,
+                        first_exc,
+                    )
+                    status_code, title, final_url, html = await _do_render(
+                        min_tier=current_tier + 1
+                    )
+                else:
+                    raise
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.render.record_failure(elapsed)

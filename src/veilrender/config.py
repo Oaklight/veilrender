@@ -12,9 +12,12 @@ def _parse_worker_entry(entry: str) -> tuple[str, str]:
     - ``cdp://host:9222`` → ("cdp", "http://host:9222")
     - ``playwright://host:1234/path`` → ("playwright", "ws://host:1234/path")
     - ``playwrights://host:1234/path`` → ("playwright", "wss://host:1234/path")
+    - ``obscura://host:9223`` → ("obscura", "http://host:9223")
     - ``http://host:9222`` → ("cdp", "http://host:9222")
     - ``host:9222`` → ("cdp", "http://host:9222")
     """
+    if entry.startswith("obscura://"):
+        return ("obscura", "http://" + entry[len("obscura://") :])
     if entry.startswith("playwrights://"):
         return ("playwright", "wss://" + entry[len("playwrights://") :])
     if entry.startswith("playwright://"):
@@ -60,6 +63,11 @@ class Settings:
         )
         self.worker_health_interval: int = int(
             os.environ.get("VEILRENDER_WORKER_HEALTH_INTERVAL", "10")
+        )
+
+        # Obscura lightweight browser (tier-0 with fallback to CloakBrowser)
+        self.obscura_enabled: bool = (
+            os.environ.get("VEILRENDER_OBSCURA", "false").lower() == "true"
         )
 
         # Font download
