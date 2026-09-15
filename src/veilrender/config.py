@@ -69,6 +69,11 @@ class Settings:
         self.obscura_enabled: bool = (
             os.environ.get("VEILRENDER_OBSCURA", "false").lower() == "true"
         )
+        self.obscura_max_concurrent: int = int(
+            os.environ.get(
+                "VEILRENDER_OBSCURA_MAX_CONCURRENT", str(self.max_concurrent)
+            )
+        )
 
         # Opaque engine tag in X-Render-Engine response header
         self.render_engine_header: bool = (

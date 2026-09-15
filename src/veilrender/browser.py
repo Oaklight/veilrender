@@ -764,7 +764,7 @@ class BrowserManager:
             self._is_local = False
         elif settings.obscura_enabled:
             self._workers = [
-                ObscuraWorker(OBSCURA_CDP_PORT, settings.max_concurrent),
+                ObscuraWorker(OBSCURA_CDP_PORT, settings.obscura_max_concurrent),
                 LocalWorker(CDP_PORT, settings.max_concurrent),
             ]
             # Multi-worker mode: need health loop even though both are local
@@ -875,6 +875,17 @@ class BrowserManager:
                 }
             )
         return result
+
+    def tier_stats(self) -> list[dict]:
+        """Aggregate active/capacity per tier for dashboard rings."""
+        tiers: dict[int, dict] = {}
+        for w in self._workers:
+            t = tiers.setdefault(w.tier, {"tier": w.tier, "active": 0, "capacity": 0})
+            t["active"] += w.active
+            if w.healthy:
+                t["capacity"] += w.max_concurrent
+            t["label"] = _TIER_LABELS.get(w.tier, f"tier-{w.tier}")
+        return sorted(tiers.values(), key=lambda t: t["tier"])
 
     async def get_cdp_url(self, worker_index: int | None = None) -> str | None:
         if worker_index is not None and 0 <= worker_index < len(self._workers):
