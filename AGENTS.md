@@ -119,7 +119,7 @@ deploy/
 ├── compose.yaml            # Single-instance (prod)
 ├── compose-dev.yaml        # Dev instance (port 7861, Obscura + CloakBrowser)
 ├── compose-pool.yaml       # Gateway + CloakBrowser workers
-├── compose-pool-mixed.yaml # Gateway + CloakBrowser + Camoufox
+├── compose-pool-mixed.yaml # Gateway + Obscura + CloakBrowser + Camoufox
 └── Dockerfile.camoufox     # Camoufox server image
 scripts/
 ├── download-cloakbrowser.py  # Download CloakBrowser binary

@@ -1,11 +1,12 @@
-# Mixed pool: VeilRender gateway + CloakBrowser (Chromium) + Camoufox (Firefox)
+# Mixed pool: VeilRender gateway + Obscura (tier 0) + CloakBrowser + Camoufox (tier 1)
 #
 # Usage:
 #   docker compose -f deploy/compose-pool-mixed.yaml up -d
 #
-# This gives dual-engine stealth coverage:
-#   - CloakBrowser: stealth Chromium (CDP) via Patchright
-#   - Camoufox: stealth Firefox (Playwright protocol)
+# Three-engine stealth coverage with two-tier fallback:
+#   - Obscura: lightweight Rust browser (tier 0, ~30MB, tries first)
+#   - CloakBrowser: stealth Chromium (tier 1, CDP) via Patchright
+#   - Camoufox: stealth Firefox (tier 1, Playwright protocol)
 
 services:
   veilrender:
@@ -17,18 +18,29 @@ services:
     environment:
       - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
       - VEILRENDER_RESOURCE_FILTER=true
-      - VEILRENDER_WORKERS=cdp://chromium-worker:9222,playwright://camoufox-worker:1234/ws
+      - VEILRENDER_WORKERS=obscura://obscura-worker:9222,cdp://chromium-worker:9222,playwright://camoufox-worker:1234/ws
       - VEILRENDER_WORKER_MAX_CONCURRENT=${VEILRENDER_WORKER_MAX_CONCURRENT:-5}
       - VEILRENDER_WORKER_HEALTH_INTERVAL=${VEILRENDER_WORKER_HEALTH_INTERVAL:-10}
+      - VEILRENDER_ENGINE_HEADER=${VEILRENDER_ENGINE_HEADER:-false}
     volumes:
       - veilrender-data:/data
     depends_on:
+      - obscura-worker
       - chromium-worker
       - camoufox-worker
     deploy:
       resources:
         limits:
           memory: 512M
+
+  obscura-worker:
+    image: h4ckf0r0day/obscura
+    restart: unless-stopped
+    command: ["--stealth", "serve", "--port", "9222"]
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
   chromium-worker:
     image: cloakhq/cloakbrowser
