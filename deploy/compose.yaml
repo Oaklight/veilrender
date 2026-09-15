@@ -1,4 +1,6 @@
-# Single-instance mode: VeilRender with embedded CloakBrowser
+# Single-instance mode: Obscura (tier 0) + CloakBrowser (tier 1)
+#
+# To disable Obscura and use CloakBrowser only, remove VEILRENDER_OBSCURA.
 services:
   veilrender:
     image: oaklight/veilrender:latest
@@ -9,6 +11,9 @@ services:
     environment:
       - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
       - VEILRENDER_RESOURCE_FILTER=true
+      - VEILRENDER_OBSCURA=true
+      - VEILRENDER_OBSCURA_MAX_CONCURRENT=${VEILRENDER_OBSCURA_MAX_CONCURRENT:-8}
+      - VEILRENDER_MAX_CONCURRENT=${VEILRENDER_MAX_CONCURRENT:-3}
     volumes:
       - veilrender-data:/data
     deploy:

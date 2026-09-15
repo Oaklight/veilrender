@@ -1,4 +1,4 @@
-# Dev instance: VeilRender with embedded CloakBrowser on port 7861
+# Dev instance: Obscura (tier 0) + CloakBrowser (tier 1) on port 7861
 services:
   veilrender-dev:
     image: oaklight/veilrender:dev-test
@@ -10,6 +10,8 @@ services:
       - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
       - VEILRENDER_RESOURCE_FILTER=true
       - VEILRENDER_OBSCURA=true
+      - VEILRENDER_OBSCURA_MAX_CONCURRENT=${VEILRENDER_OBSCURA_MAX_CONCURRENT:-8}
+      - VEILRENDER_MAX_CONCURRENT=${VEILRENDER_MAX_CONCURRENT:-3}
       - VEILRENDER_ENGINE_HEADER=true
     volumes:
       - veilrender-dev-data:/data
