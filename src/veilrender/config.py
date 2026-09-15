@@ -74,6 +74,10 @@ class Settings:
                 "VEILRENDER_OBSCURA_MAX_CONCURRENT", str(self.max_concurrent)
             )
         )
+        # Tier-0 deadline (ms) before speculative tier-1 starts racing
+        self.obscura_timeout: int = int(
+            os.environ.get("VEILRENDER_OBSCURA_TIMEOUT", "10000")
+        )
 
         # Opaque engine tag in X-Render-Engine response header
         self.render_engine_header: bool = (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -96,16 +97,21 @@ def register(app: App) -> None:
                 return JSONResponse(cached)
             stats.render.cache_misses += 1
 
-        async def _do_render(*, min_tier: int = 0) -> tuple[int, str, str, str, str]:
+        async def _do_render(
+            *, min_tier: int = 0, tier_timeout: int | None = None
+        ) -> tuple[int, str, str, str, str]:
+            t = tier_timeout or timeout
             async with browser_manager.get_page(min_tier=min_tier) as (
                 ctx,
                 page,
                 engine,
+                force_wu,
             ):
+                effective_wu = force_wu or req.wait_until
                 response = await page.goto(
                     req.url,
-                    wait_until=req.wait_until,
-                    timeout=timeout,
+                    wait_until=effective_wu,
+                    timeout=t,
                 )
                 status_code = response.status if response else 0
                 title = await page.title()
@@ -114,20 +120,36 @@ def register(app: App) -> None:
                 return status_code, title, final_url, html, engine
 
         try:
-            try:
-                status_code, title, final_url, html, engine = await _do_render()
-            except Exception as first_exc:
-                if browser_manager.has_fallback_tier(0):
+            if browser_manager.has_fallback_tier(0):
+                tier0_timeout = min(settings.obscura_timeout, timeout)
+                tier0_task = asyncio.create_task(_do_render(tier_timeout=tier0_timeout))
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(tier0_task),
+                        timeout=tier0_timeout / 1000,
+                    )
+                    status_code, title, final_url, html, engine = result
+                except (TimeoutError, Exception) as first_exc:
                     logger.warning(
-                        "Tier-0 render failed for %s: %s, retrying with fallback",
+                        "Tier-0 render slow/failed for %s: %s, racing with tier-1",
                         req.url,
-                        first_exc,
+                        type(first_exc).__name__,
                     )
-                    status_code, title, final_url, html, engine = await _do_render(
-                        min_tier=1
+                    tier1_task = asyncio.create_task(_do_render(min_tier=1))
+                    done, pending = await asyncio.wait(
+                        {tier0_task, tier1_task},
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
-                else:
-                    raise
+                    for p in pending:
+                        p.cancel()
+                        try:
+                            await p
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    winner = done.pop()
+                    status_code, title, final_url, html, engine = winner.result()
+            else:
+                status_code, title, final_url, html, engine = await _do_render()
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.render.record_failure(elapsed)
