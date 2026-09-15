@@ -137,12 +137,9 @@ def register(app: App) -> None:
                         req.url,
                         type(first_exc).__name__,
                     )
+                    # Fire-and-forget cancel — don't block on unresponsive CDP
                     if not tier0_task.done():
                         tier0_task.cancel()
-                        try:
-                            await tier0_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
                     status_code, title, final_url, html, engine = await _do_render(
                         min_tier=1
                     )

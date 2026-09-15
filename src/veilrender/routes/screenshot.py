@@ -147,10 +147,6 @@ def register(app: App) -> None:
                     )
                     if not tier0_task.done():
                         tier0_task.cancel()
-                        try:
-                            await tier0_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
                     image_bytes, engine = await _do_screenshot(min_tier=1)
             else:
                 image_bytes, engine = await _do_screenshot()
