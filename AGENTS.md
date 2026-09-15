@@ -55,6 +55,41 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | `RemoteWorker` | 1 | `chromium.connect_over_cdp()` | Any CDP-compatible Chromium | Driver-level (Patchright) |
 | `PlaywrightWorker` | 1 | `firefox.connect()` | Camoufox or Playwright-served Firefox | Browser-level (Camoufox) |
 
+### Deployment modes
+
+| Mode | Config | Workers |
+|------|--------|---------|
+| Single CloakBrowser (default) | No extra env vars | `LocalWorker` (tier 1) |
+| Two-tier local | `VEILRENDER_OBSCURA=true` | `ObscuraWorker` (tier 0) + `LocalWorker` (tier 1) |
+| Pool with Obscura | `VEILRENDER_WORKERS=obscura://obs:9223,cdp://chrome:9222` | Remote Obscura (tier 0) + Remote Chrome (tier 1) |
+| Pool mixed | `VEILRENDER_WORKERS=obscura://obs:9223,cdp://chrome:9222,playwright://fox:1234/ws` | Obscura + Chrome + Camoufox |
+
+### Environment variables
+
+#### Obscura / tier system
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VEILRENDER_OBSCURA` | `false` | Enable local Obscura (tier 0) + CloakBrowser (tier 1) two-tier mode |
+| `VEILRENDER_OBSCURA_MAX_CONCURRENT` | `VEILRENDER_MAX_CONCURRENT` | Max concurrent pages for Obscura (tier 0); independent of tier-1 limit |
+| `VEILRENDER_ENGINE_HEADER` | `false` | Include opaque `X-Render-Engine` header in responses (`alpha` = tier 0, `beta` = tier 1) |
+| `OBSCURA_BINARY` | — | Path to Obscura binary (skips auto-download) |
+| `OBSCURA_VERSION` | `0.2.2` | Obscura version to auto-download |
+| `OBSCURA_MIRROR` | — | URL prefix for Obscura download mirror |
+
+#### Core
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VEILRENDER_API_TOKEN` | — | Bearer token for authentication |
+| `VEILRENDER_PORT` | `7860` | Server listen port |
+| `VEILRENDER_MAX_CONCURRENT` | `5` | Max concurrent pages for tier-1 workers (CloakBrowser) |
+| `VEILRENDER_TIMEOUT` | `30000` | Default navigation timeout (ms) |
+| `VEILRENDER_WORKERS` | — | Remote worker pool (comma-separated: `cdp://`, `playwright://`, `obscura://`) |
+| `VEILRENDER_RESOURCE_FILTER` | `true` | Enable outbound request blocklist |
+| `CLOAKBROWSER_BINARY` | — | Path to CloakBrowser binary (skips auto-download) |
+| `CLOAKBROWSER_MIRROR` | — | URL prefix for CloakBrowser download mirror |
+
 ## Repository layout
 
 ```
@@ -82,7 +117,7 @@ src/veilrender/
     └── soup.py          # HTML parser
 deploy/
 ├── compose.yaml            # Single-instance (prod)
-├── compose-dev.yaml        # Dev instance (port 7861)
+├── compose-dev.yaml        # Dev instance (port 7861, Obscura + CloakBrowser)
 ├── compose-pool.yaml       # Gateway + CloakBrowser workers
 ├── compose-pool-mixed.yaml # Gateway + CloakBrowser + Camoufox
 └── Dockerfile.camoufox     # Camoufox server image
