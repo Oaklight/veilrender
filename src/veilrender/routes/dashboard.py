@@ -46,6 +46,7 @@ async def _stats_json() -> dict:
             "/screenshot": _ep_dict(stats.screenshot),
         },
         "workers": await browser_manager.worker_stats(),
+        "tiers": browser_manager.tier_stats(),
     }
 
 
@@ -81,7 +82,9 @@ def _stats_row(name: str, ep: stats.EndpointStats) -> str:
         </tr>"""
 
 
-def _capacity_ring(active: int, max_conc: int, utilization: float) -> str:
+def _capacity_ring(
+    active: int, max_conc: int, utilization: float, prefix: str = "ring"
+) -> str:
     """Build an SVG ring gauge for capacity."""
     filled = _RING_CIRCUMFERENCE * utilization / 100
     gap = _RING_CIRCUMFERENCE - filled
@@ -94,14 +97,14 @@ def _capacity_ring(active: int, max_conc: int, utilization: float) -> str:
          data-circ="{_RING_CIRCUMFERENCE:.4f}">
       <circle cx="50" cy="50" r="{_RING_RADIUS}" fill="none"
               stroke="rgba(255,255,255,0.05)" stroke-width="6"/>
-      <circle cx="50" cy="50" r="{_RING_RADIUS}" fill="none" id="ring-fill"
+      <circle cx="50" cy="50" r="{_RING_RADIUS}" fill="none" id="{prefix}-fill"
               stroke="{color}" stroke-width="6"
               stroke-dasharray="{filled:.4f} {gap:.4f}"
               stroke-linecap="round"
               transform="rotate(-90 50 50)"
               style="filter:drop-shadow(0 0 6px {color}50);transition:stroke-dasharray .6s,stroke .6s"/>
-      <text x="50" y="47" text-anchor="middle" class="ring-num" id="ring-active">{active}</text>
-      <text x="50" y="62" text-anchor="middle" class="ring-sub" id="ring-max">/ {max_conc}</text>
+      <text x="50" y="47" text-anchor="middle" class="ring-num" id="{prefix}-active">{active}</text>
+      <text x="50" y="62" text-anchor="middle" class="ring-sub" id="{prefix}-max">/ {max_conc}</text>
     </svg>"""
 
 
@@ -112,7 +115,26 @@ async def _build_html() -> str:
     dot_cls = "dot-on" if d["browser_alive"] else "dot-off"
     fail_cls = "c-err" if d["total_failures"] > 0 else "c-ok"
 
-    ring_svg = _capacity_ring(d["active"], d["max_concurrent"], d["utilization"])
+    tiers = d["tiers"]
+    if len(tiers) > 1:
+        ring_cards = ""
+        for t in tiers:
+            cap = t["capacity"]
+            act = t["active"]
+            util = (act / cap * 100) if cap > 0 else 0
+            svg = _capacity_ring(act, cap, util, prefix=f"ring-t{t['tier']}")
+            ring_cards += f"""
+        <div class="card ring-card">
+          {svg}
+          <div class="ring-lbl">{t["label"]}</div>
+        </div>"""
+    else:
+        ring_svg = _capacity_ring(d["active"], d["max_concurrent"], d["utilization"])
+        ring_cards = f"""
+        <div class="card ring-card">
+          {ring_svg}
+          <div class="ring-lbl" data-i18n="capacity">Capacity</div>
+        </div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -249,14 +271,14 @@ async def _build_html() -> str:
 
     /* Metrics grid */
     .metrics {{
-      display: grid;
-      grid-template-columns: 160px 1fr;
+      display: flex;
       gap: 0.75rem;
       margin-bottom: 2rem;
     }}
     .ring-card {{
       padding: 1.4rem;
       display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5rem;
+      min-width: 160px; flex-shrink: 0;
     }}
     .ring-lbl {{
       font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
@@ -270,7 +292,7 @@ async def _build_html() -> str:
     .ring-sub {{
       font-family: var(--fm); font-size: 11px; fill: var(--text-2);
     }}
-    .nums {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }}
+    .nums {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; flex: 1; min-width: 0; }}
     .num {{ padding: 1.3rem 1.4rem; }}
     .num .lbl {{
       font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
@@ -332,8 +354,8 @@ async def _build_html() -> str:
       .wrap {{ padding: 2rem 1.25rem; }}
       .hdr {{ flex-direction: column; align-items: flex-start; }}
       .status {{ flex-direction: column; }}
-      .metrics {{ grid-template-columns: 1fr; }}
-      .ring-card {{ justify-content: flex-start; padding-left: 2rem; }}
+      .metrics {{ flex-wrap: wrap; }}
+      .ring-card {{ min-width: auto; flex: 1 1 140px; }}
       .nums {{ grid-template-columns: repeat(2, 1fr); }}
     }}
 
@@ -375,10 +397,7 @@ async def _build_html() -> str:
 
   <div class="sec in d2" data-i18n="sec_metrics">Metrics</div>
   <div class="metrics in d3">
-    <div class="card ring-card">
-      {ring_svg}
-      <div class="ring-lbl" data-i18n="capacity">Capacity</div>
-    </div>
+    {ring_cards}
     <div class="nums">
       <div class="card num">
         <div class="lbl" data-i18n="requests">Requests</div>
@@ -519,6 +538,21 @@ async def _build_html() -> str:
   const ringColor = u => u < 70 ? '#6ee7b7' : u < 90 ? '#fbbf24' : '#f87171';
   let fails = 0;
 
+  function updateRing(prefix, active, capacity) {{
+    const cap = capacity || 0;
+    const u = cap > 0 ? active / cap * 100 : 0;
+    const filled = CIRC * u / 100;
+    const gap = CIRC - filled;
+    const col = ringColor(u);
+    const ring = document.getElementById(prefix + '-fill');
+    if (!ring) return;
+    ring.setAttribute('stroke-dasharray', filled.toFixed(4) + ' ' + gap.toFixed(4));
+    ring.setAttribute('stroke', col);
+    ring.style.filter = 'drop-shadow(0 0 6px ' + col + '50)';
+    document.getElementById(prefix + '-active').textContent = active;
+    document.getElementById(prefix + '-max').textContent = '/ ' + cap;
+  }}
+
   function update() {{
     fetch('/stats').then(r => r.json()).then(d => {{
       fails = 0;
@@ -530,16 +564,13 @@ async def _build_html() -> str:
       document.getElementById('browser-val').textContent = d.browser_alive ? t.alive : t.dead;
       document.getElementById('uptime-val').textContent = d.uptime;
 
-      const u = d.utilization;
-      const filled = CIRC * u / 100;
-      const gap = CIRC - filled;
-      const col = ringColor(u);
-      const ring = document.getElementById('ring-fill');
-      ring.setAttribute('stroke-dasharray', filled.toFixed(4) + ' ' + gap.toFixed(4));
-      ring.setAttribute('stroke', col);
-      ring.style.filter = 'drop-shadow(0 0 6px ' + col + '50)';
-      document.getElementById('ring-active').textContent = d.active;
-      document.getElementById('ring-max').textContent = '/ ' + d.max_concurrent;
+      if (d.tiers && d.tiers.length > 1) {{
+        d.tiers.forEach(function(tier) {{
+          updateRing('ring-t' + tier.tier, tier.active, tier.capacity);
+        }});
+      }} else {{
+        updateRing('ring', d.active, d.max_concurrent);
+      }}
 
       document.getElementById('total-req').textContent = d.total_requests;
       document.getElementById('total-ok').textContent = d.total_successes;
