@@ -2,11 +2,16 @@
 #
 # Usage:
 #   docker compose -f deploy/compose-pool-mixed.yaml up -d
+#   docker compose -f deploy/compose-pool-mixed.yaml up -d --scale obscura-worker=3
 #
 # Three-engine stealth coverage with two-tier fallback:
 #   - Obscura: lightweight Rust browser (tier 0, ~30MB, tries first)
 #   - CloakBrowser: stealth Chromium (tier 1, CDP) via Patchright
 #   - Camoufox: stealth Firefox (tier 1, Playwright protocol)
+#
+# Default replicas: 3 Obscura : 1 CloakBrowser : 1 Camoufox
+# Obscura is ~30MB per instance vs ~200MB+ for Chromium/Firefox,
+# so a higher replica count gives more tier-0 throughput cheaply.
 
 services:
   veilrender:
@@ -38,6 +43,7 @@ services:
     restart: unless-stopped
     command: ["--stealth", "serve", "--port", "9222"]
     deploy:
+      replicas: ${OBSCURA_REPLICAS:-3}
       resources:
         limits:
           memory: 256M
@@ -47,6 +53,7 @@ services:
     restart: unless-stopped
     command: ["cloakserve"]
     deploy:
+      replicas: ${CHROMIUM_REPLICAS:-1}
       resources:
         limits:
           memory: 1G
@@ -57,6 +64,7 @@ services:
       dockerfile: deploy/Dockerfile.camoufox
     restart: unless-stopped
     deploy:
+      replicas: ${CAMOUFOX_REPLICAS:-1}
       resources:
         limits:
           memory: 1G
