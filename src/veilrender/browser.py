@@ -289,7 +289,8 @@ class _BaseWorker:
         self.max_concurrent = max_concurrent
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self.healthy = False
-        self._full_since: float | None = None
+        self._stuck_since: float | None = None
+        self._last_active: int = 0
 
     async def start(self) -> None:
         raise NotImplementedError
@@ -835,16 +836,18 @@ class BrowserManager:
                         w.healthy = True
                         logger.info("Worker %s recovered", w.endpoint)
 
-                    # Stuck detection: all slots occupied too long
-                    if w.healthy and w.available == 0:
-                        if w._full_since is None:
-                            w._full_since = now
-                        elif now - w._full_since > stuck_threshold:
+                    # Stuck detection: active slots not changing for too long
+                    cur_active = w.active
+                    if w.healthy and cur_active > 0:
+                        if cur_active != w._last_active:
+                            w._stuck_since = now
+                            w._last_active = cur_active
+                        elif w._stuck_since and now - w._stuck_since > stuck_threshold:
                             logger.warning(
-                                "Worker %s stuck (all %d slots occupied for %.0fs), restarting",
+                                "Worker %s stuck (%d slots occupied for %.0fs), restarting",
                                 w.endpoint,
-                                w.max_concurrent,
-                                now - w._full_since,
+                                cur_active,
+                                now - w._stuck_since,
                             )
                             await w.stop()
                             try:
@@ -855,9 +858,11 @@ class BrowserManager:
                                     w.endpoint,
                                     exc_info=True,
                                 )
-                            w._full_since = None
+                            w._stuck_since = None
+                            w._last_active = 0
                     else:
-                        w._full_since = None
+                        w._stuck_since = None
+                        w._last_active = 0
                 except Exception:
                     logger.debug("Health check error for %s", w.endpoint, exc_info=True)
 
