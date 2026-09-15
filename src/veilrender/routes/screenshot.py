@@ -128,17 +128,13 @@ def register(app: App) -> None:
             try:
                 image_bytes = await _do_screenshot()
             except Exception as first_exc:
-                current_tier = browser_manager.min_healthy_tier
-                if current_tier is not None and browser_manager.has_fallback_tier(
-                    current_tier
-                ):
+                if browser_manager.has_fallback_tier(0):
                     logger.warning(
-                        "Tier-%d screenshot failed for %s: %s, retrying with fallback",
-                        current_tier,
+                        "Tier-0 screenshot failed for %s: %s, retrying with fallback",
                         req.url,
                         first_exc,
                     )
-                    image_bytes = await _do_screenshot(min_tier=current_tier + 1)
+                    image_bytes = await _do_screenshot(min_tier=1)
                 else:
                     raise
         except Exception as exc:

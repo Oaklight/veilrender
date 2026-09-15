@@ -50,7 +50,7 @@ def main() -> None:
 
     print("Extracting...")
     with tarfile.open(tmp, "r:gz") as tf:
-        tf.extractall(dest)
+        tf.extractall(dest, filter="data")
     os.unlink(tmp)
 
     if os.path.isfile(binary):

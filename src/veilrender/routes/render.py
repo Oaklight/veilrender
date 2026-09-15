@@ -103,29 +103,23 @@ def register(app: App) -> None:
                     wait_until=req.wait_until,
                     timeout=timeout,
                 )
-                sc = response.status if response else 0
-                t = await page.title()
-                fu = page.url
-                h = await page.content()
-                return sc, t, fu, h
+                status_code = response.status if response else 0
+                title = await page.title()
+                final_url = page.url
+                html = await page.content()
+                return status_code, title, final_url, html
 
         try:
             try:
                 status_code, title, final_url, html = await _do_render()
             except Exception as first_exc:
-                current_tier = browser_manager.min_healthy_tier
-                if current_tier is not None and browser_manager.has_fallback_tier(
-                    current_tier
-                ):
+                if browser_manager.has_fallback_tier(0):
                     logger.warning(
-                        "Tier-%d render failed for %s: %s, retrying with fallback",
-                        current_tier,
+                        "Tier-0 render failed for %s: %s, retrying with fallback",
                         req.url,
                         first_exc,
                     )
-                    status_code, title, final_url, html = await _do_render(
-                        min_tier=current_tier + 1
-                    )
+                    status_code, title, final_url, html = await _do_render(min_tier=1)
                 else:
                     raise
         except Exception as exc:
