@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-15
+
+### Added
+
+- **Obscura headless browser** as tier-0 worker — lightweight Rust-based browser (~30MB memory, ~85ms page loads) with built-in stealth, auto-downloaded from GitHub releases ([#41], [#42])
+- **Two-tier fallback system** — try Obscura first (tier 0), automatically fall back to CloakBrowser/Camoufox (tier 1) on failure ([#41], [#42])
+- `ObscuraWorker` class with local subprocess management, CDP connection, and auto-restart ([#42])
+- Tier system: `_BaseWorker.tier` attribute, tier-aware `_pick_worker()` dispatch preferring lowest available tier ([#42])
+- `obscura://` protocol prefix for remote Obscura workers in pool mode ([#42])
+- `VEILRENDER_OBSCURA=true` env var to enable local two-tier mode ([#42])
+- `VEILRENDER_OBSCURA_MAX_CONCURRENT` for independent Obscura concurrency limits ([#44])
+- Configurable `X-Render-Engine` response header with opaque engine labels (`alpha`/`beta`), enabled via `VEILRENDER_ENGINE_HEADER=true` ([#43])
+- Per-tier ring gauges on dashboard — shows independent capacity for each tier when multiple tiers are configured ([#44])
+- `BrowserManager.tier_stats()` for aggregated per-tier metrics in `/stats` JSON API ([#44])
+- `scripts/download-obscura.py` for build-time binary download ([#42])
+- `OBSCURA_BINARY`, `OBSCURA_MIRROR`, `OBSCURA_VERSION` env vars for binary management ([#42])
+
+### Changed
+
+- `BrowserManager.get_page()` yields 3-tuple `(ctx, page, engine_label)` instead of 2-tuple ([#43])
+- Dashboard metrics layout changed from CSS grid to flexbox to support variable number of ring gauges ([#44])
+- Dockerfile `full` target downloads both CloakBrowser and Obscura binaries ([#42])
+- `tarfile.extractall()` calls use `filter='data'` to mitigate CVE-2007-4559 path traversal ([#42])
+
 ## [0.5.1] - 2026-09-09
 
 ### Changed
@@ -155,7 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Oaklight/veilrender/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Oaklight/veilrender/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Oaklight/veilrender/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/Oaklight/veilrender/compare/v0.4.0...v0.4.1
@@ -193,3 +218,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#38]: https://github.com/Oaklight/veilrender/pull/38
 [#39]: https://github.com/Oaklight/veilrender/issues/39
 [#40]: https://github.com/Oaklight/veilrender/pull/40
+[#41]: https://github.com/Oaklight/veilrender/issues/41
+[#42]: https://github.com/Oaklight/veilrender/pull/42
+[#43]: https://github.com/Oaklight/veilrender/pull/43
+[#44]: https://github.com/Oaklight/veilrender/pull/44

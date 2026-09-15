@@ -10,6 +10,7 @@ services:
       - VEILRENDER_API_TOKEN=${VEILRENDER_API_TOKEN:-changeme}
       - VEILRENDER_RESOURCE_FILTER=true
       - VEILRENDER_OBSCURA=true
+      - VEILRENDER_ENGINE_HEADER=true
     volumes:
       - veilrender-dev-data:/data
     deploy:
