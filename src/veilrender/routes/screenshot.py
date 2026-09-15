@@ -129,14 +129,14 @@ def register(app: App) -> None:
                     return await locator.screenshot(**element_kwargs), engine
                 return await page.screenshot(**screenshot_kwargs), engine
 
-        try:
+        async def _screenshot_pipeline() -> tuple[bytes, str]:
             if browser_manager.has_fallback_tier(0):
                 tier0_timeout = min(settings.obscura_timeout, timeout)
                 tier0_task = asyncio.create_task(
                     _do_screenshot(tier_timeout=tier0_timeout)
                 )
                 try:
-                    image_bytes, engine = await asyncio.wait_for(
+                    return await asyncio.wait_for(
                         tier0_task, timeout=tier0_timeout / 1000
                     )
                 except Exception as first_exc:
@@ -147,9 +147,24 @@ def register(app: App) -> None:
                     )
                     if not tier0_task.done():
                         tier0_task.cancel()
-                    image_bytes, engine = await _do_screenshot(min_tier=1)
-            else:
-                image_bytes, engine = await _do_screenshot()
+                    return await _do_screenshot(min_tier=1)
+            return await _do_screenshot()
+
+        try:
+            image_bytes, engine = await asyncio.wait_for(
+                _screenshot_pipeline(), timeout=settings.request_deadline
+            )
+        except TimeoutError:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.screenshot.record_failure(elapsed)
+            logger.error(
+                "Screenshot deadline exceeded for %s (%.0fms)", req.url, elapsed
+            )
+            return Response(
+                body=b'{"error": "Screenshot timed out"}',
+                status_code=504,
+                content_type="application/json",
+            )
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.screenshot.record_failure(elapsed)

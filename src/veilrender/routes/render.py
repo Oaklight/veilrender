@@ -119,32 +119,37 @@ def register(app: App) -> None:
                 html = await page.content()
                 return status_code, title, final_url, html, engine
 
-        try:
+        async def _render_pipeline() -> tuple[int, str, str, str, str]:
             if browser_manager.has_fallback_tier(0):
                 tier0_timeout = min(settings.obscura_timeout, timeout)
                 tier0_task = asyncio.create_task(_do_render(tier_timeout=tier0_timeout))
                 try:
-                    (
-                        status_code,
-                        title,
-                        final_url,
-                        html,
-                        engine,
-                    ) = await asyncio.wait_for(tier0_task, timeout=tier0_timeout / 1000)
+                    return await asyncio.wait_for(
+                        tier0_task, timeout=tier0_timeout / 1000
+                    )
                 except Exception as first_exc:
                     logger.warning(
                         "Tier-0 render slow/failed for %s: %s, falling back to tier-1",
                         req.url,
                         type(first_exc).__name__,
                     )
-                    # Fire-and-forget cancel — don't block on unresponsive CDP
                     if not tier0_task.done():
                         tier0_task.cancel()
-                    status_code, title, final_url, html, engine = await _do_render(
-                        min_tier=1
-                    )
-            else:
-                status_code, title, final_url, html, engine = await _do_render()
+                    return await _do_render(min_tier=1)
+            return await _do_render()
+
+        try:
+            status_code, title, final_url, html, engine = await asyncio.wait_for(
+                _render_pipeline(), timeout=settings.request_deadline
+            )
+        except TimeoutError:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.render.record_failure(elapsed)
+            logger.error("Render deadline exceeded for %s (%.0fms)", req.url, elapsed)
+            return JSONResponse(
+                {"error": "Render timed out"},
+                status_code=504,
+            )
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.render.record_failure(elapsed)
