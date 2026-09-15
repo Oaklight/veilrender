@@ -70,14 +70,14 @@ def register(app: App) -> None:
         stats.screenshot.requests += 1
         t0 = time.monotonic()
 
-        async def _do_screenshot(*, min_tier: int = 0) -> bytes:
+        async def _do_screenshot(*, min_tier: int = 0) -> tuple[bytes, str]:
             async with browser_manager.get_page(
                 viewport_width=req.viewport_width,
                 viewport_height=req.viewport_height,
                 device_scale_factor=req.scale,
                 color_scheme=req.color_scheme,
                 min_tier=min_tier,
-            ) as (ctx, page):
+            ) as (ctx, page, engine):
                 await page.goto(
                     req.url,
                     wait_until=req.wait_until,
@@ -121,12 +121,12 @@ def register(app: App) -> None:
                     element_kwargs = {
                         k: v for k, v in screenshot_kwargs.items() if k != "full_page"
                     }
-                    return await locator.screenshot(**element_kwargs)
-                return await page.screenshot(**screenshot_kwargs)
+                    return await locator.screenshot(**element_kwargs), engine
+                return await page.screenshot(**screenshot_kwargs), engine
 
         try:
             try:
-                image_bytes = await _do_screenshot()
+                image_bytes, engine = await _do_screenshot()
             except Exception as first_exc:
                 if browser_manager.has_fallback_tier(0):
                     logger.warning(
@@ -134,7 +134,7 @@ def register(app: App) -> None:
                         req.url,
                         first_exc,
                     )
-                    image_bytes = await _do_screenshot(min_tier=1)
+                    image_bytes, engine = await _do_screenshot(min_tier=1)
                 else:
                     raise
         except Exception as exc:
@@ -149,8 +149,12 @@ def register(app: App) -> None:
 
         elapsed = (time.monotonic() - t0) * 1000
         stats.screenshot.record_success(elapsed)
+        headers = {}
+        if settings.render_engine_header:
+            headers["X-Render-Engine"] = engine
         return Response(
             body=image_bytes,
             status_code=200,
+            headers=headers or None,
             content_type=_CONTENT_TYPES[req.format],
         )

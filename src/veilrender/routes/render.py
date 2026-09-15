@@ -96,8 +96,12 @@ def register(app: App) -> None:
                 return JSONResponse(cached)
             stats.render.cache_misses += 1
 
-        async def _do_render(*, min_tier: int = 0) -> tuple[int, str, str, str]:
-            async with browser_manager.get_page(min_tier=min_tier) as (ctx, page):
+        async def _do_render(*, min_tier: int = 0) -> tuple[int, str, str, str, str]:
+            async with browser_manager.get_page(min_tier=min_tier) as (
+                ctx,
+                page,
+                engine,
+            ):
                 response = await page.goto(
                     req.url,
                     wait_until=req.wait_until,
@@ -107,11 +111,11 @@ def register(app: App) -> None:
                 title = await page.title()
                 final_url = page.url
                 html = await page.content()
-                return status_code, title, final_url, html
+                return status_code, title, final_url, html, engine
 
         try:
             try:
-                status_code, title, final_url, html = await _do_render()
+                status_code, title, final_url, html, engine = await _do_render()
             except Exception as first_exc:
                 if browser_manager.has_fallback_tier(0):
                     logger.warning(
@@ -119,7 +123,9 @@ def register(app: App) -> None:
                         req.url,
                         first_exc,
                     )
-                    status_code, title, final_url, html = await _do_render(min_tier=1)
+                    status_code, title, final_url, html, engine = await _do_render(
+                        min_tier=1
+                    )
                 else:
                     raise
         except Exception as exc:
@@ -172,4 +178,7 @@ def register(app: App) -> None:
             except Exception:
                 logger.debug("Cache store failed", exc_info=True)
 
-        return JSONResponse(result_dict)
+        headers = {}
+        if settings.render_engine_header:
+            headers["X-Render-Engine"] = engine
+        return JSONResponse(result_dict, headers=headers or None)

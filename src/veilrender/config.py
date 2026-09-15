@@ -70,6 +70,11 @@ class Settings:
             os.environ.get("VEILRENDER_OBSCURA", "false").lower() == "true"
         )
 
+        # Opaque engine tag in X-Render-Engine response header
+        self.render_engine_header: bool = (
+            os.environ.get("VEILRENDER_ENGINE_HEADER", "false").lower() == "true"
+        )
+
         # Font download
         _fonts_raw = os.environ.get("VEILRENDER_FONTS", "")
         self.fonts: list[str] = (
