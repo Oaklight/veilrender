@@ -124,36 +124,28 @@ def register(app: App) -> None:
                 tier0_timeout = min(settings.obscura_timeout, timeout)
                 tier0_task = asyncio.create_task(_do_render(tier_timeout=tier0_timeout))
                 try:
-                    result = await asyncio.wait_for(
-                        asyncio.shield(tier0_task),
-                        timeout=tier0_timeout / 1000,
-                    )
-                    status_code, title, final_url, html, engine = result
+                    (
+                        status_code,
+                        title,
+                        final_url,
+                        html,
+                        engine,
+                    ) = await asyncio.wait_for(tier0_task, timeout=tier0_timeout / 1000)
                 except Exception as first_exc:
                     logger.warning(
-                        "Tier-0 render slow/failed for %s: %s, racing with tier-1",
+                        "Tier-0 render slow/failed for %s: %s, falling back to tier-1",
                         req.url,
                         type(first_exc).__name__,
                     )
-                    tier1_task = asyncio.create_task(_do_render(min_tier=1))
-                    # If tier-0 already failed (not just slow), skip the race
-                    if tier0_task.done():
-                        status_code, title, final_url, html, engine = await tier1_task
-                    else:
-                        done, pending = await asyncio.wait(
-                            {tier0_task, tier1_task},
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                        for p in pending:
-                            p.cancel()
-                            try:
-                                await p
-                            except (asyncio.CancelledError, Exception):
-                                pass
-                        winner = done.pop()
-                        if winner.exception() and pending:
-                            winner = (await asyncio.wait(pending))[0].pop()
-                        status_code, title, final_url, html, engine = winner.result()
+                    if not tier0_task.done():
+                        tier0_task.cancel()
+                        try:
+                            await tier0_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    status_code, title, final_url, html, engine = await _do_render(
+                        min_tier=1
+                    )
             else:
                 status_code, title, final_url, html, engine = await _do_render()
         except Exception as exc:

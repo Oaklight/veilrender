@@ -136,35 +136,22 @@ def register(app: App) -> None:
                     _do_screenshot(tier_timeout=tier0_timeout)
                 )
                 try:
-                    result = await asyncio.wait_for(
-                        asyncio.shield(tier0_task),
-                        timeout=tier0_timeout / 1000,
+                    image_bytes, engine = await asyncio.wait_for(
+                        tier0_task, timeout=tier0_timeout / 1000
                     )
-                    image_bytes, engine = result
                 except Exception as first_exc:
                     logger.warning(
-                        "Tier-0 screenshot slow/failed for %s: %s, racing with tier-1",
+                        "Tier-0 screenshot slow/failed for %s: %s, falling back to tier-1",
                         req.url,
                         type(first_exc).__name__,
                     )
-                    tier1_task = asyncio.create_task(_do_screenshot(min_tier=1))
-                    if tier0_task.done():
-                        image_bytes, engine = await tier1_task
-                    else:
-                        done, pending = await asyncio.wait(
-                            {tier0_task, tier1_task},
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                        for p in pending:
-                            p.cancel()
-                            try:
-                                await p
-                            except (asyncio.CancelledError, Exception):
-                                pass
-                        winner = done.pop()
-                        if winner.exception() and pending:
-                            winner = (await asyncio.wait(pending))[0].pop()
-                        image_bytes, engine = winner.result()
+                    if not tier0_task.done():
+                        tier0_task.cancel()
+                        try:
+                            await tier0_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    image_bytes, engine = await _do_screenshot(min_tier=1)
             else:
                 image_bytes, engine = await _do_screenshot()
         except Exception as exc:
