@@ -13,6 +13,7 @@ import logging
 import os
 import random
 import subprocess
+import time
 import urllib.request
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -280,11 +281,13 @@ class _BaseWorker:
     endpoint: str = "unknown"
     worker_type: str = "unknown"
     tier: int = 1
+    force_wait_until: str | None = None
 
     def __init__(self, max_concurrent: int) -> None:
         self.max_concurrent = max_concurrent
         self._semaphore = asyncio.Semaphore(max_concurrent)
         self.healthy = False
+        self._full_since: float | None = None
 
     async def start(self) -> None:
         raise NotImplementedError
@@ -481,6 +484,7 @@ class ObscuraWorker(_BaseWorker):
     """Browser worker backed by a local Obscura process."""
 
     tier = 0
+    force_wait_until = "load"
 
     def __init__(self, cdp_port: int, max_concurrent: int) -> None:
         super().__init__(max_concurrent)
@@ -809,8 +813,10 @@ class BrowserManager:
 
     async def _health_loop(self) -> None:
         interval = settings.worker_health_interval
+        stuck_threshold = settings.timeout * 2 / 1000
         while True:
             await asyncio.sleep(interval)
+            now = time.monotonic()
             for w in self._workers:
                 try:
                     alive = w.is_alive
@@ -826,6 +832,30 @@ class BrowserManager:
                     elif alive and not w.healthy:
                         w.healthy = True
                         logger.info("Worker %s recovered", w.endpoint)
+
+                    # Stuck detection: all slots occupied too long
+                    if w.healthy and w.available == 0:
+                        if w._full_since is None:
+                            w._full_since = now
+                        elif now - w._full_since > stuck_threshold:
+                            logger.warning(
+                                "Worker %s stuck (all %d slots occupied for %.0fs), restarting",
+                                w.endpoint,
+                                w.max_concurrent,
+                                now - w._full_since,
+                            )
+                            await w.stop()
+                            try:
+                                await w.start()
+                            except Exception:
+                                logger.error(
+                                    "Failed to restart stuck worker %s",
+                                    w.endpoint,
+                                    exc_info=True,
+                                )
+                            w._full_since = None
+                    else:
+                        w._full_since = None
                 except Exception:
                     logger.debug("Health check error for %s", w.endpoint, exc_info=True)
 
@@ -910,7 +940,7 @@ class BrowserManager:
         device_scale_factor: float | None = None,
         color_scheme: str | None = None,
         min_tier: int = 0,
-    ) -> AsyncIterator[tuple[BrowserContext, Page, str]]:
+    ) -> AsyncIterator[tuple[BrowserContext, Page, str, str | None]]:
         worker = self._pick_worker(min_tier=min_tier)
         engine_label = _TIER_LABELS.get(worker.tier, "unknown")
         async with worker.get_page(
@@ -920,7 +950,7 @@ class BrowserManager:
             color_scheme=color_scheme,
             route_handler=self._route_handler,
         ) as (ctx, page):
-            yield ctx, page, engine_label
+            yield ctx, page, engine_label, worker.force_wait_until
 
 
 browser_manager = BrowserManager()

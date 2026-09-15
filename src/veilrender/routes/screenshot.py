@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -70,18 +71,22 @@ def register(app: App) -> None:
         stats.screenshot.requests += 1
         t0 = time.monotonic()
 
-        async def _do_screenshot(*, min_tier: int = 0) -> tuple[bytes, str]:
+        async def _do_screenshot(
+            *, min_tier: int = 0, tier_timeout: int | None = None
+        ) -> tuple[bytes, str]:
+            t = tier_timeout or timeout
             async with browser_manager.get_page(
                 viewport_width=req.viewport_width,
                 viewport_height=req.viewport_height,
                 device_scale_factor=req.scale,
                 color_scheme=req.color_scheme,
                 min_tier=min_tier,
-            ) as (ctx, page, engine):
+            ) as (ctx, page, engine, force_wu):
+                effective_wu = force_wu or req.wait_until
                 await page.goto(
                     req.url,
-                    wait_until=req.wait_until,
-                    timeout=timeout,
+                    wait_until=effective_wu,
+                    timeout=t,
                 )
                 css_urls = [req.font_css] if req.font_css else get_auto_font_css_urls()
                 host = request.headers.get("host", "")
@@ -125,18 +130,38 @@ def register(app: App) -> None:
                 return await page.screenshot(**screenshot_kwargs), engine
 
         try:
-            try:
-                image_bytes, engine = await _do_screenshot()
-            except Exception as first_exc:
-                if browser_manager.has_fallback_tier(0):
-                    logger.warning(
-                        "Tier-0 screenshot failed for %s: %s, retrying with fallback",
-                        req.url,
-                        first_exc,
+            if browser_manager.has_fallback_tier(0):
+                tier0_timeout = min(settings.obscura_timeout, timeout)
+                tier0_task = asyncio.create_task(
+                    _do_screenshot(tier_timeout=tier0_timeout)
+                )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(tier0_task),
+                        timeout=tier0_timeout / 1000,
                     )
-                    image_bytes, engine = await _do_screenshot(min_tier=1)
-                else:
-                    raise
+                    image_bytes, engine = result
+                except (TimeoutError, Exception) as first_exc:
+                    logger.warning(
+                        "Tier-0 screenshot slow/failed for %s: %s, racing with tier-1",
+                        req.url,
+                        type(first_exc).__name__,
+                    )
+                    tier1_task = asyncio.create_task(_do_screenshot(min_tier=1))
+                    done, pending = await asyncio.wait(
+                        {tier0_task, tier1_task},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for p in pending:
+                        p.cancel()
+                        try:
+                            await p
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    winner = done.pop()
+                    image_bytes, engine = winner.result()
+            else:
+                image_bytes, engine = await _do_screenshot()
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.screenshot.record_failure(elapsed)
