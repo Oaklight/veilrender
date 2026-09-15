@@ -167,7 +167,7 @@ def _download_obscura_binary(version: str | None = None) -> str:
     try:
         urllib.request.urlretrieve(url, tmp)
         with tarfile.open(tmp, "r:gz") as tf:
-            tf.extractall(dest_dir)
+            tf.extractall(dest_dir, filter="data")
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -765,6 +765,7 @@ class BrowserManager:
                 ObscuraWorker(OBSCURA_CDP_PORT, settings.max_concurrent),
                 LocalWorker(CDP_PORT, settings.max_concurrent),
             ]
+            # Multi-worker mode: need health loop even though both are local
             self._is_local = False
         else:
             self._workers = [LocalWorker(CDP_PORT, settings.max_concurrent)]
