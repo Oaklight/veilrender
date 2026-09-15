@@ -926,13 +926,19 @@ class BrowserManager:
             entry["label"] = _TIER_LABELS.get(w.tier, "unknown")
         return sorted(tiers.values(), key=lambda s: s["tier"])
 
-    async def get_cdp_url(self, worker_index: int | None = None) -> str | None:
+    async def get_cdp_url(
+        self, worker_index: int | None = None, *, min_tier: int = 1
+    ) -> str | None:
         if worker_index is not None and 0 <= worker_index < len(self._workers):
             w = self._workers[worker_index]
             if w.healthy and w.worker_type == "cdp":
                 return await w.get_cdp_url()
             return None
-        cdp_workers = [w for w in self._workers if w.healthy and w.worker_type == "cdp"]
+        cdp_workers = [
+            w
+            for w in self._workers
+            if w.healthy and w.worker_type == "cdp" and w.tier >= min_tier
+        ]
         if not cdp_workers:
             return None
         w = max(cdp_workers, key=lambda w: w.available)

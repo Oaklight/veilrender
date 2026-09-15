@@ -79,6 +79,11 @@ class Settings:
             os.environ.get("VEILRENDER_OBSCURA_TIMEOUT", "10000")
         )
 
+        # Hard request deadline (seconds) — kills entire pipeline, returns 504
+        self.request_deadline: int = int(
+            os.environ.get("VEILRENDER_REQUEST_DEADLINE", "45")
+        )
+
         # Opaque engine tag in X-Render-Engine response header
         self.render_engine_header: bool = (
             os.environ.get("VEILRENDER_ENGINE_HEADER", "false").lower() == "true"

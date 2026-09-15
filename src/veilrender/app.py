@@ -129,15 +129,23 @@ def main() -> None:
                 # Check if this is a WebSocket upgrade to /cdp
                 if is_websocket_upgrade(method, headers, path):
                     worker_idx: int | None = None
+                    cdp_min_tier: int = 1
                     for part in query_string.split("&"):
                         if part.startswith("worker="):
                             try:
                                 worker_idx = int(part.split("=", 1)[1])
                             except ValueError:
                                 pass
+                        elif part.startswith("tier="):
+                            try:
+                                cdp_min_tier = int(part.split("=", 1)[1])
+                            except ValueError:
+                                pass
 
                     async def _get_cdp_url() -> str | None:
-                        return await browser_manager.get_cdp_url(worker_idx)
+                        return await browser_manager.get_cdp_url(
+                            worker_idx, min_tier=cdp_min_tier
+                        )
 
                     await handle_cdp_upgrade(
                         reader,
