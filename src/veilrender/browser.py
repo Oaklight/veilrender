@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 CDP_PORT = 9222
 OBSCURA_CDP_PORT = 9223
 
+_TIER_LABELS: dict[int, str] = {0: "alpha", 1: "beta"}
+
 _CLOAKBROWSER_DEFAULT_DIR = os.path.expanduser("~/.cloakbrowser")
 _OBSCURA_DEFAULT_DIR = os.path.expanduser("~/.obscura")
 _OBSCURA_DEFAULT_VERSION = "0.2.2"
@@ -895,16 +897,17 @@ class BrowserManager:
         device_scale_factor: float | None = None,
         color_scheme: str | None = None,
         min_tier: int = 0,
-    ) -> AsyncIterator[tuple[BrowserContext, Page]]:
+    ) -> AsyncIterator[tuple[BrowserContext, Page, str]]:
         worker = self._pick_worker(min_tier=min_tier)
+        engine_label = _TIER_LABELS.get(worker.tier, f"tier-{worker.tier}")
         async with worker.get_page(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
             device_scale_factor=device_scale_factor,
             color_scheme=color_scheme,
             route_handler=self._route_handler,
-        ) as result:
-            yield result
+        ) as (ctx, page):
+            yield ctx, page, engine_label
 
 
 browser_manager = BrowserManager()
