@@ -880,12 +880,14 @@ class BrowserManager:
         """Aggregate active/capacity per tier for dashboard rings."""
         tiers: dict[int, dict] = {}
         for w in self._workers:
-            t = tiers.setdefault(w.tier, {"tier": w.tier, "active": 0, "capacity": 0})
-            t["active"] += w.active
+            entry = tiers.setdefault(
+                w.tier, {"tier": w.tier, "active": 0, "capacity": 0}
+            )
+            entry["active"] += w.active
             if w.healthy:
-                t["capacity"] += w.max_concurrent
-            t["label"] = _TIER_LABELS.get(w.tier, f"tier-{w.tier}")
-        return sorted(tiers.values(), key=lambda t: t["tier"])
+                entry["capacity"] += w.max_concurrent
+            entry["label"] = _TIER_LABELS.get(w.tier, "unknown")
+        return sorted(tiers.values(), key=lambda s: s["tier"])
 
     async def get_cdp_url(self, worker_index: int | None = None) -> str | None:
         if worker_index is not None and 0 <= worker_index < len(self._workers):
@@ -910,7 +912,7 @@ class BrowserManager:
         min_tier: int = 0,
     ) -> AsyncIterator[tuple[BrowserContext, Page, str]]:
         worker = self._pick_worker(min_tier=min_tier)
-        engine_label = _TIER_LABELS.get(worker.tier, f"tier-{worker.tier}")
+        engine_label = _TIER_LABELS.get(worker.tier, "unknown")
         async with worker.get_page(
             viewport_width=viewport_width,
             viewport_height=viewport_height,
