@@ -17,7 +17,7 @@ import time
 import urllib.request
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from patchright.async_api import Browser, BrowserContext, Page, async_playwright
 
@@ -25,6 +25,8 @@ from veilrender.config import settings
 from veilrender.filters import load_blocklist, make_route_handler
 
 logger = logging.getLogger(__name__)
+
+WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 
 CDP_PORT = 9222
 OBSCURA_CDP_PORT = 9223
@@ -281,7 +283,7 @@ class _BaseWorker:
     endpoint: str = "unknown"
     worker_type: str = "unknown"
     tier: int = 1
-    force_wait_until: str | None = None
+    force_wait_until: WaitUntil | None = None
 
     def __init__(self, max_concurrent: int) -> None:
         self.max_concurrent = max_concurrent
@@ -940,7 +942,7 @@ class BrowserManager:
         device_scale_factor: float | None = None,
         color_scheme: str | None = None,
         min_tier: int = 0,
-    ) -> AsyncIterator[tuple[BrowserContext, Page, str, str | None]]:
+    ) -> AsyncIterator[tuple[BrowserContext, Page, str, WaitUntil | None]]:
         worker = self._pick_worker(min_tier=min_tier)
         engine_label = _TIER_LABELS.get(worker.tier, "unknown")
         async with worker.get_page(
