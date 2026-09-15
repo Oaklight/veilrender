@@ -48,12 +48,13 @@ RUN mkdir /gbm-libs && \
         cp -a /usr/lib/x86_64-linux-gnu/${lib}.so* /gbm-libs/ 2>/dev/null || true; \
     done
 
-## ── full (CloakBrowser binary downloaded directly) ───────
+## ── full (CloakBrowser + Obscura binaries) ───────────────
 ## docker build -t oaklight/veilrender:latest .
 FROM base AS full
 
 COPY --from=gbm-donor /gbm-libs/* /usr/lib/x86_64-linux-gnu/
 USER 1000
 RUN python scripts/download-cloakbrowser.py
+RUN python scripts/download-obscura.py
 EXPOSE 7860
 CMD ["python", "-m", "veilrender"]

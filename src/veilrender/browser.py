@@ -26,9 +26,12 @@ from veilrender.filters import load_blocklist, make_route_handler
 logger = logging.getLogger(__name__)
 
 CDP_PORT = 9222
+OBSCURA_CDP_PORT = 9223
 
 _CLOAKBROWSER_DEFAULT_DIR = os.path.expanduser("~/.cloakbrowser")
-
+_OBSCURA_DEFAULT_DIR = os.path.expanduser("~/.obscura")
+_OBSCURA_DEFAULT_VERSION = "0.2.2"
+_OBSCURA_GITHUB_BASE = "https://github.com/h4ckf0r0day/obscura/releases/download"
 
 _CLOAKBROWSER_PYPI_URL = "https://pypi.org/pypi/cloakbrowser/json"
 
@@ -127,6 +130,79 @@ def _find_browser_binary() -> str:
     return _download_browser_binary()
 
 
+def _detect_obscura_platform() -> str:
+    """Detect platform string for Obscura download URL."""
+    import platform as _platform
+
+    machine = _platform.machine().lower()
+    system = _platform.system().lower()
+    if system == "linux":
+        arch = "x86_64" if machine in ("x86_64", "amd64") else "aarch64"
+        return f"{arch}-linux"
+    if system == "darwin":
+        arch = "aarch64" if machine == "arm64" else "x86_64"
+        return f"{arch}-macos"
+    raise RuntimeError(f"Unsupported platform for Obscura: {system}-{machine}")
+
+
+def _download_obscura_binary(version: str | None = None) -> str:
+    """Download Obscura binary from GitHub releases (stealth variant)."""
+    import tarfile
+
+    version = version or os.environ.get("OBSCURA_VERSION", _OBSCURA_DEFAULT_VERSION)
+    plat = _detect_obscura_platform()
+    gh_url = f"{_OBSCURA_GITHUB_BASE}/v{version}/obscura-{plat}-stealth.tar.gz"
+    mirror = os.environ.get("OBSCURA_MIRROR", "")
+    url = f"{mirror}/{gh_url}" if mirror else gh_url
+    dest_dir = os.path.join(_OBSCURA_DEFAULT_DIR, f"v{version}")
+    binary = os.path.join(dest_dir, "obscura")
+
+    if os.path.isfile(binary):
+        logger.info("Obscura binary already exists at %s", binary)
+        return binary
+
+    logger.info("Downloading Obscura %s (%s)...", version, plat)
+    os.makedirs(dest_dir, exist_ok=True)
+    tmp = os.path.join(dest_dir, ".download.tar.gz")
+    try:
+        urllib.request.urlretrieve(url, tmp)
+        with tarfile.open(tmp, "r:gz") as tf:
+            tf.extractall(dest_dir)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+    if os.path.isfile(binary):
+        os.chmod(binary, 0o755)
+    logger.info("Downloaded Obscura %s to %s", version, binary)
+    return binary
+
+
+def _find_obscura_binary() -> str:
+    """Locate the Obscura binary.
+
+    Search order:
+    1. OBSCURA_BINARY env var
+    2. ~/.obscura/*/obscura (pre-downloaded)
+    3. Auto-download from GitHub releases
+    """
+    env_path = os.environ.get("OBSCURA_BINARY")
+    if env_path:
+        if os.path.isfile(env_path) and os.access(env_path, os.X_OK):
+            logger.info("Using Obscura binary from OBSCURA_BINARY: %s", env_path)
+            return env_path
+        raise FileNotFoundError(
+            f"OBSCURA_BINARY={env_path} not found or not executable"
+        )
+
+    candidates = sorted(glob.glob(f"{_OBSCURA_DEFAULT_DIR}/*/obscura"), reverse=True)
+    if candidates:
+        logger.info("Found Obscura binary: %s", candidates[0])
+        return candidates[0]
+
+    return _download_obscura_binary()
+
+
 def _get_stealth_args() -> list[str]:
     """Get stealth launch arguments for CloakBrowser."""
     fingerprint = random.randint(10000, 99999)
@@ -201,6 +277,7 @@ class _BaseWorker:
 
     endpoint: str = "unknown"
     worker_type: str = "unknown"
+    tier: int = 1
 
     def __init__(self, max_concurrent: int) -> None:
         self.max_concurrent = max_concurrent
@@ -394,6 +471,125 @@ class LocalWorker(_BaseWorker):
 
 
 # ---------------------------------------------------------------------------
+# Obscura worker — spawns a local Obscura process
+# ---------------------------------------------------------------------------
+
+
+class ObscuraWorker(_BaseWorker):
+    """Browser worker backed by a local Obscura process."""
+
+    tier = 0
+
+    def __init__(self, cdp_port: int, max_concurrent: int) -> None:
+        super().__init__(max_concurrent)
+        self.cdp_port = cdp_port
+        self.endpoint = "obscura-local"
+        self.worker_type = "cdp"
+        self._playwright = None
+        self._browser: Browser | None = None
+        self._proc: subprocess.Popen | None = None  # type: ignore[type-arg]
+        self._lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        executable_path = _find_obscura_binary()
+
+        obscura_args = [
+            executable_path,
+            "serve",
+            f"--port={self.cdp_port}",
+            "--stealth",
+        ]
+
+        self._proc = subprocess.Popen(
+            obscura_args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+        cdp_url = f"http://127.0.0.1:{self.cdp_port}"
+        for _ in range(30):
+            try:
+                urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1)
+                break
+            except Exception:
+                if self._proc.poll() is not None:
+                    stderr = (
+                        self._proc.stderr.read().decode() if self._proc.stderr else ""
+                    )
+                    raise RuntimeError(
+                        f"Obscura exited prematurely. stderr: {stderr[:500]}"
+                    )
+                await asyncio.sleep(0.5)
+        else:
+            stderr = self._proc.stderr.read().decode() if self._proc.stderr else ""
+            raise RuntimeError(
+                f"Obscura CDP not ready after 15s. stderr: {stderr[:500]}"
+            )
+
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.connect_over_cdp(cdp_url)
+        self.healthy = True
+        logger.info(
+            "Obscura browser started (%s, CDP on :%d)",
+            executable_path,
+            self.cdp_port,
+        )
+
+    async def stop(self) -> None:
+        self.healthy = False
+        if self._browser:
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
+            self._browser = None
+        if self._playwright:
+            await self._playwright.stop()
+            self._playwright = None
+        if self._proc:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+            self._proc = None
+
+    async def ensure_ready(self) -> Browser:
+        async with self._lock:
+            proc_dead = self._proc is None or self._proc.poll() is not None
+            browser_dead = self._browser is None or not self._browser.is_connected()
+            if proc_dead or browser_dead:
+                logger.warning("Obscura not connected, restarting...")
+                await self.stop()
+                await self.start()
+            assert self._browser is not None
+            return self._browser
+
+    async def get_cdp_url(self) -> str | None:
+        await self.ensure_ready()
+        try:
+            data = await asyncio.to_thread(
+                _fetch_json,
+                f"http://127.0.0.1:{self.cdp_port}/json/version",
+            )
+            ws_url = data.get("webSocketDebuggerUrl")
+            if ws_url:
+                return ws_url
+        except Exception:
+            logger.debug("Failed to get Obscura CDP WebSocket URL", exc_info=True)
+        return f"ws://127.0.0.1:{self.cdp_port}"
+
+    async def browser_page_count(self) -> int:
+        return await asyncio.to_thread(
+            _count_cdp_pages, f"http://127.0.0.1:{self.cdp_port}"
+        )
+
+    @property
+    def is_alive(self) -> bool:
+        return self._browser is not None and self._browser.is_connected()
+
+
+# ---------------------------------------------------------------------------
 # Remote worker — connects to an external CDP endpoint
 # ---------------------------------------------------------------------------
 
@@ -555,10 +751,20 @@ class BrowserManager:
                     self._workers.append(
                         PlaywrightWorker(endpoint, settings.worker_max_concurrent)
                     )
+                elif protocol == "obscura":
+                    w = RemoteWorker(endpoint, settings.worker_max_concurrent)
+                    w.tier = 0
+                    self._workers.append(w)
                 else:
                     self._workers.append(
                         RemoteWorker(endpoint, settings.worker_max_concurrent)
                     )
+            self._is_local = False
+        elif settings.obscura_enabled:
+            self._workers = [
+                ObscuraWorker(OBSCURA_CDP_PORT, settings.max_concurrent),
+                LocalWorker(CDP_PORT, settings.max_concurrent),
+            ]
             self._is_local = False
         else:
             self._workers = [LocalWorker(CDP_PORT, settings.max_concurrent)]
@@ -620,11 +826,21 @@ class BrowserManager:
                 except Exception:
                     logger.debug("Health check error for %s", w.endpoint, exc_info=True)
 
-    def _pick_worker(self) -> _BaseWorker:
-        healthy = [w for w in self._workers if w.healthy]
+    def _pick_worker(self, *, min_tier: int = 0) -> _BaseWorker:
+        healthy = [w for w in self._workers if w.healthy and w.tier >= min_tier]
         if not healthy:
             raise RuntimeError("No healthy browser workers available")
-        return max(healthy, key=lambda w: w.available)
+        return min(healthy, key=lambda w: (w.tier, -w.available))
+
+    def has_fallback_tier(self, current_tier: int) -> bool:
+        """Check if any healthy worker exists at a higher tier."""
+        return any(w.healthy and w.tier > current_tier for w in self._workers)
+
+    @property
+    def min_healthy_tier(self) -> int | None:
+        """Return the lowest tier among healthy workers, or None."""
+        healthy_tiers = [w.tier for w in self._workers if w.healthy]
+        return min(healthy_tiers) if healthy_tiers else None
 
     @property
     def active_pages(self) -> int:
@@ -647,6 +863,7 @@ class BrowserManager:
                     "index": i,
                     "type": w.worker_type,
                     "endpoint": w.endpoint,
+                    "tier": w.tier,
                     "healthy": w.healthy,
                     "active": w.active,
                     "browser_pages": browser_pages,
@@ -676,8 +893,9 @@ class BrowserManager:
         viewport_height: int | None = None,
         device_scale_factor: float | None = None,
         color_scheme: str | None = None,
+        min_tier: int = 0,
     ) -> AsyncIterator[tuple[BrowserContext, Page]]:
-        worker = self._pick_worker()
+        worker = self._pick_worker(min_tier=min_tier)
         async with worker.get_page(
             viewport_width=viewport_width,
             viewport_height=viewport_height,

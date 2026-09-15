@@ -70,12 +70,13 @@ def register(app: App) -> None:
         stats.screenshot.requests += 1
         t0 = time.monotonic()
 
-        try:
+        async def _do_screenshot(*, min_tier: int = 0) -> bytes:
             async with browser_manager.get_page(
                 viewport_width=req.viewport_width,
                 viewport_height=req.viewport_height,
                 device_scale_factor=req.scale,
                 color_scheme=req.color_scheme,
+                min_tier=min_tier,
             ) as (ctx, page):
                 await page.goto(
                     req.url,
@@ -120,10 +121,26 @@ def register(app: App) -> None:
                     element_kwargs = {
                         k: v for k, v in screenshot_kwargs.items() if k != "full_page"
                     }
-                    image_bytes = await locator.screenshot(**element_kwargs)
-                else:
-                    image_bytes = await page.screenshot(**screenshot_kwargs)
+                    return await locator.screenshot(**element_kwargs)
+                return await page.screenshot(**screenshot_kwargs)
 
+        try:
+            try:
+                image_bytes = await _do_screenshot()
+            except Exception as first_exc:
+                current_tier = browser_manager.min_healthy_tier
+                if current_tier is not None and browser_manager.has_fallback_tier(
+                    current_tier
+                ):
+                    logger.warning(
+                        "Tier-%d screenshot failed for %s: %s, retrying with fallback",
+                        current_tier,
+                        req.url,
+                        first_exc,
+                    )
+                    image_bytes = await _do_screenshot(min_tier=current_tier + 1)
+                else:
+                    raise
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.screenshot.record_failure(elapsed)

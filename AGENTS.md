@@ -5,9 +5,12 @@
 ## What this project is
 
 VeilRender is a **headless browser rendering API** — accepts a URL, renders it
-with a stealth Chromium browser (CloakBrowser + Patchright), returns
-HTML/Markdown/readability content. Designed as a fallback for fetch tools that
-fail on JavaScript-rendered pages.
+with a stealth browser, returns HTML/Markdown/readability content. Designed as
+a fallback for fetch tools that fail on JavaScript-rendered pages.
+
+Uses a **two-tier worker system**: lightweight Obscura (Rust, ~30MB) as tier-0
+for fast renders, falling back to CloakBrowser/Camoufox (full Chromium/Firefox)
+as tier-1 when Obscura can't handle a page.
 
 Supports two deployment modes: **single-instance** (embedded browser) and
 **gateway + worker pool** (browser containers scale independently).
@@ -23,9 +26,11 @@ parsing, readability extraction.
 ```
 HTTP request → auth → route handler → browser_manager.get_page()
                                         ↓
-                              LocalWorker (embedded CloakBrowser)
-                              RemoteWorker (CDP, Chromium)
-                              PlaywrightWorker (Playwright protocol, Firefox/Camoufox)
+                              tier 0: ObscuraWorker (embedded Obscura, Rust)
+                                ↓ (fallback on failure)
+                              tier 1: LocalWorker (embedded CloakBrowser)
+                                      RemoteWorker (CDP, Chromium)
+                                      PlaywrightWorker (Playwright protocol, Firefox/Camoufox)
 ```
 
 ### Key components
@@ -33,7 +38,7 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | Component | File | Purpose |
 |-----------|------|---------|
 | HTTP server | `_vendor/httpserver` | Async HTTP framework (zerodep) |
-| Browser pool | `browser.py` | `LocalWorker`, `RemoteWorker`, `PlaywrightWorker`, `BrowserManager` |
+| Browser pool | `browser.py` | `ObscuraWorker`, `LocalWorker`, `RemoteWorker`, `PlaywrightWorker`, `BrowserManager` |
 | Config | `config.py` | `VEILRENDER_*` env vars, worker protocol parsing |
 | Routes | `routes/*.py` | `/render`, `/screenshot`, `/health`, `/metrics`, `/stats`, `/` dashboard |
 | Storage | `storage.py` | L1 TTLCache + L2 S3 (vendored `S3Client`) |
@@ -43,11 +48,12 @@ HTTP request → auth → route handler → browser_manager.get_page()
 
 ### Worker types
 
-| Type | Connection | Browser | Stealth |
-|------|-----------|---------|---------|
-| `LocalWorker` | Local subprocess | CloakBrowser (auto-downloaded) | Browser-level + driver-level |
-| `RemoteWorker` | `chromium.connect_over_cdp()` | Any CDP-compatible Chromium | Driver-level (Patchright) |
-| `PlaywrightWorker` | `firefox.connect()` | Camoufox or Playwright-served Firefox | Browser-level (Camoufox) |
+| Type | Tier | Connection | Browser | Stealth |
+|------|------|-----------|---------|---------|
+| `ObscuraWorker` | 0 | Local subprocess | Obscura (auto-downloaded Rust binary) | Built-in (V8 + TLS fingerprint) |
+| `LocalWorker` | 1 | Local subprocess | CloakBrowser (auto-downloaded) | Browser-level + driver-level |
+| `RemoteWorker` | 1 | `chromium.connect_over_cdp()` | Any CDP-compatible Chromium | Driver-level (Patchright) |
+| `PlaywrightWorker` | 1 | `firefox.connect()` | Camoufox or Playwright-served Firefox | Browser-level (Camoufox) |
 
 ## Repository layout
 
@@ -81,7 +87,8 @@ deploy/
 ├── compose-pool-mixed.yaml # Gateway + CloakBrowser + Camoufox
 └── Dockerfile.camoufox     # Camoufox server image
 scripts/
-└── download-cloakbrowser.py  # Download CloakBrowser binary
+├── download-cloakbrowser.py  # Download CloakBrowser binary
+└── download-obscura.py       # Download Obscura binary
 ```
 
 ## Commands
@@ -131,7 +138,9 @@ ssh oaklight.buttercup 'cd /dockervol/dockge/stacks/veilrender && \
 
 ## Escalation
 
-- Browser won't start → check `_find_browser_binary()` cascade:
+- Obscura won't start → check `_find_obscura_binary()` cascade:
+  `OBSCURA_BINARY` env → `~/.obscura/*/obscura` → auto-download
+- CloakBrowser won't start → check `_find_browser_binary()` cascade:
   `CLOAKBROWSER_BINARY` env → `~/.cloakbrowser/*/chrome` → auto-download
 - Remote worker won't connect → check `_resolve_to_ip()` (Chromium rejects
   non-IP Host headers), verify CDP port is accessible
