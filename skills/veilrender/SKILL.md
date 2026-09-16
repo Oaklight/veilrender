@@ -1,7 +1,7 @@
 ---
 name: veilrender
-version: 0.5.0
-description: "Render JavaScript-heavy pages via VeilRender API: fetch fully rendered HTML, Markdown, readability text, or PNG/JPEG screenshots from URLs that fail with plain HTTP fetch."
+version: 0.6.1
+description: "Render JavaScript-heavy pages via VeilRender API: two-tier stealth browser (Obscura + Chromium/Firefox fallback) returns fully rendered HTML, Markdown, readability text, or PNG/JPEG screenshots from URLs that fail with plain HTTP fetch."
 homepage: https://github.com/Oaklight/veilrender
 metadata:
   {
@@ -18,6 +18,11 @@ metadata:
 Render JavaScript-heavy or bot-protected pages via a VeilRender API instance.
 Use this when `curl`/`fetch` returns empty or incomplete content because the
 page requires a real browser to render.
+
+VeilRender uses a **two-tier browser system**: lightweight Obscura (Rust) as
+tier-0 for fast renders (~85ms), falling back to CloakBrowser/Camoufox as
+tier-1 when needed. The tier used is reported in the `X-Render-Engine` response
+header (`alpha` = tier 0, `beta` = tier 1) when enabled on the instance.
 
 ## Setup
 
@@ -44,7 +49,10 @@ print(f'Token: {\"configured\" if token else \"not set\"}')
 - "Do you have a hosted VeilRender instance? If so, what is the URL and API token?"
 - If they don't have one, suggest self-hosting:
   ```bash
-  docker run -d -p 7860:7860 -e VEILRENDER_API_TOKEN=changeme oaklight/veilrender:latest
+  docker run -d -p 7860:7860 \
+    -e VEILRENDER_API_TOKEN=changeme \
+    -e VEILRENDER_OBSCURA=true \
+    oaklight/veilrender:latest
   ```
 
 **Step 3**: Save the config so it persists across sessions:
@@ -119,6 +127,7 @@ curl -s -X POST "$VEILRENDER_URL/render" \
 | `url` | string | *(required)* | URL to render |
 | `formats` | string[] | `["html"]` | `html`, `readability`, `markdown` |
 | `wait_until` | string | `"load"` | `load`, `domcontentloaded`, `networkidle` |
+| `timeout` | int | `30000` | Navigation timeout in milliseconds |
 
 ### Response
 
@@ -138,6 +147,10 @@ curl -s -X POST "$VEILRENDER_URL/render" \
 }
 ```
 
+**Response headers** (when `VEILRENDER_ENGINE_HEADER=true` on the instance):
+- `X-Render-Engine: alpha` — rendered by Obscura (tier 0)
+- `X-Render-Engine: beta` — rendered by CloakBrowser/Camoufox (tier 1)
+
 ## Take a screenshot
 
 Returns a PNG or JPEG image of the rendered page.
@@ -154,6 +167,12 @@ curl -s -X POST "$VEILRENDER_URL/screenshot" \
   -H "Authorization: Bearer $VEILRENDER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com", "format": "jpeg", "quality": 80}' -o screenshot.jpg
+
+# Full-page capture
+curl -s -X POST "$VEILRENDER_URL/screenshot" \
+  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "full_page": true}' -o fullpage.png
 
 # Element screenshot
 curl -s -X POST "$VEILRENDER_URL/screenshot" \
@@ -182,6 +201,7 @@ curl -s -X POST "$VEILRENDER_URL/screenshot" \
 | `color_scheme` | string | — | `"light"`, `"dark"`, or `"no-preference"` |
 | `wait_for` | string | — | CSS selector to wait for before capture |
 | `transparent` | bool | `false` | Transparent background (PNG only) |
+| `timeout` | int | `30000` | Navigation timeout in milliseconds |
 | `viewport_width` | int | `1280` | Override viewport width |
 | `viewport_height` | int | `720` | Override viewport height |
 
@@ -231,20 +251,36 @@ for url in "https://site1.com" "https://site2.com" "https://site3.com"; do
 done
 ```
 
+### Screenshot with custom timeout for slow pages
+
+```bash
+curl -s -X POST "$VEILRENDER_URL/screenshot" \
+  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://slow-site.com", "timeout": 45000, "full_page": true}' \
+  -o screenshot.png
+```
+
 ## Error handling
 
 | HTTP Code | Meaning |
 |-----------|---------|
 | 200 | Success |
-| 401 | Invalid or missing API token |
-| 422 | Invalid request (bad URL, missing fields) |
-| 502 | Browser rendering failed (timeout, crash, blocked URL) |
+| 400 | Invalid request (bad URL, missing fields, blocked scheme) |
+| 403 | Invalid or missing API token |
+| 429 | Rate limit exceeded — check `Retry-After` header |
+| 502 | Browser rendering failed (crash, blocked URL) |
+| 503 | Server overloaded (queue depth limit) — check `Retry-After` header |
+| 504 | Request deadline exceeded (default 45s hard ceiling) |
 
-On 502, check if the URL is accessible and try with `"wait_until": "networkidle"` for slow-loading pages.
+On 502, check if the URL is accessible and try with a longer `timeout`.
+On 429/503, wait for the `Retry-After` duration before retrying.
+On 504, the page is too slow for the configured deadline — consider simpler pages or raising the server's `VEILRENDER_REQUEST_DEADLINE`.
 
 ## Notes
 
-- VeilRender uses a stealth browser (CloakBrowser) — it passes bot detection on most sites
+- VeilRender uses a two-tier stealth browser system — Obscura (Rust, tier 0) for speed, with automatic fallback to full Chromium/Firefox (tier 1) for compatibility. Both tiers include anti-detection
 - Pages with CAPTCHAs may still fail; consider adding a residential proxy
 - The service blocks ad/tracker domains by default (`VEILRENDER_RESOURCE_FILTER=true`)
 - Stats dashboard available at `$VEILRENDER_URL/` (no auth needed for the dashboard)
+- Font CSS for CJK/Arabic/Thai/Hindi is cached locally — no external network during screenshots after first load
