@@ -14,7 +14,7 @@ from veilrender.auth import verify_token
 from veilrender.browser import QueueFullError, browser_manager
 from veilrender.ratelimit import check_rate_limit
 from veilrender.config import settings
-from veilrender.fonts import get_auto_font_css_urls, get_emoji_font_css
+from veilrender.fonts import get_auto_font_css_content, get_emoji_font_css
 from veilrender.models import ScreenshotRequest
 from veilrender.url_validator import URLValidationError, validate_url
 
@@ -102,26 +102,26 @@ def register(app: App) -> None:
                     wait_until=effective_wu,
                     timeout=goto_timeout,
                 )
-                # Skip font injection on tier-0 (Obscura CDP can't handle
-                # external stylesheet loads reliably) and on full_page
-                # captures (content matters more than typography there).
-                if min_tier > 0 and not req.full_page:
-                    css_urls = (
-                        [req.font_css] if req.font_css else get_auto_font_css_urls()
-                    )
-                    host = request.headers.get("host", "")
-                    proto = request.headers.get("x-forwarded-proto", "")
-                    emoji_css = get_emoji_font_css(host, proto)
+                # Font CSS is cached locally as inline content — single
+                # add_style_tag(content=...) call, no external network.
+                # Skip on full_page where content > typography.
+                if not req.full_page:
                     try:
-                        for css_url in css_urls:
-                            await page.add_style_tag(url=css_url)
+                        if req.font_css:
+                            await page.add_style_tag(url=req.font_css)
+                        else:
+                            font_css = get_auto_font_css_content()
+                            if font_css:
+                                await page.add_style_tag(content=font_css)
+                        host = request.headers.get("host", "")
+                        proto = request.headers.get("x-forwarded-proto", "")
+                        emoji_css = get_emoji_font_css(host, proto)
                         if emoji_css:
                             await page.add_style_tag(content=emoji_css)
-                        if css_urls or emoji_css:
-                            await asyncio.wait_for(
-                                page.evaluate("() => document.fonts.ready"),
-                                timeout=5,
-                            )
+                        await asyncio.wait_for(
+                            page.evaluate("() => document.fonts.ready"),
+                            timeout=8,
+                        )
                     except (TimeoutError, Exception):
                         logger.debug("Font injection skipped (timeout/error)")
 

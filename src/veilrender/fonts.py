@@ -132,13 +132,23 @@ _LANG_TO_CSS: dict[str, str] = {
     "hi": f"{_FONTSOURCE}/noto-sans-devanagari/index.css",
 }
 
-_auto_css_urls: list[str] | None = None
+_auto_css_content: list[str] | None = None
 _auto_detected = False
 _needs_emoji_serving = False
 
+# Font CSS cache directory
+_FONT_CSS_CACHE_DIR = Path(settings.font_dir) / "css_cache"
+
+# CDN mirrors to race for font CSS downloads
+_CDN_MIRRORS: list[str] = [
+    "https://cdn.jsdelivr.net/npm/@fontsource",
+    "https://unpkg.com/@fontsource",
+    "https://esm.sh/@fontsource",
+]
+
 
 def _detect_missing_fonts() -> list[str]:
-    """Probe local font coverage via fc-list, return CSS URLs for missing scripts."""
+    """Probe local font coverage via fc-list, return lang tags for missing scripts."""
     missing: list[str] = []
     try:
         result = subprocess.run(
@@ -156,9 +166,9 @@ def _detect_missing_fonts() -> list[str]:
     except (FileNotFoundError, subprocess.TimeoutExpired):
         installed_langs = set()
 
-    for lang, css_url in _LANG_TO_CSS.items():
+    for lang in _LANG_TO_CSS:
         if lang not in installed_langs:
-            missing.append(css_url)
+            missing.append(lang)
 
     return missing
 
@@ -177,59 +187,139 @@ def has_local_emoji() -> bool:
         return False
 
 
-def get_auto_font_css_urls() -> list[str]:
-    """Return CSS URLs for missing local fonts.
+def _fetch_css_racing(font_name: str) -> str | None:
+    """Download font CSS from the fastest CDN mirror."""
+    import re as _re
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    For CJK/Arabic/Thai/Hindi: jsDelivr @fontsource CSS URLs.
-    For emoji: needs gateway font serving (CSS injection doesn't work).
+    css_path = font_name.split("/")[-1]
 
-    Result is cached after first call. Override with ``VEILRENDER_FONT_CSS``
-    env var (comma-separated URLs) or per-request ``font_css`` parameter.
+    def _try_cdn(base_url: str) -> str:
+        url = f"{base_url}/{css_path}/index.css"
+        if settings.font_mirror:
+            url = f"{settings.font_mirror}/{url}"
+        resp = urllib.request.urlopen(url, timeout=15)
+        return resp.read().decode("utf-8")
+
+    with ThreadPoolExecutor(max_workers=len(_CDN_MIRRORS)) as pool:
+        futures = {pool.submit(_try_cdn, cdn): cdn for cdn in _CDN_MIRRORS}
+        for future in as_completed(futures, timeout=20):
+            try:
+                css_text = future.result()
+                # Rewrite url(./files/foo.woff2) → url(/fonts/fontsource/font-name/foo.woff2)
+                css_text = _re.sub(
+                    r"url\(\./files/([^)]+)\)",
+                    rf"url(/fonts/fontsource/{css_path}/\1)",
+                    css_text,
+                )
+                return css_text
+            except Exception:
+                continue
+    return None
+
+
+def _load_font_css(lang: str) -> str | None:
+    """Load font CSS for a language, using local cache or CDN fetch."""
+    font_name = _LANG_TO_CSS[lang]
+    css_path = font_name.split("/")[-1]
+    cache_file = _FONT_CSS_CACHE_DIR / f"{css_path}.css"
+
+    if cache_file.exists():
+        return cache_file.read_text("utf-8")
+
+    logger.info("Downloading font CSS for %s from CDN (racing)...", css_path)
+    css_text = _fetch_css_racing(font_name)
+    if css_text:
+        _FONT_CSS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(css_text, "utf-8")
+        logger.info("Cached font CSS: %s (%d bytes)", css_path, len(css_text))
+    else:
+        logger.warning("Failed to download font CSS for %s from all CDNs", css_path)
+    return css_text
+
+
+def _dedup_font_faces(css_text: str) -> str:
+    """Deduplicate @font-face rules by (font-family, unicode-range)."""
+    import re as _re
+
+    blocks = _re.findall(r"@font-face\s*\{[^}]+\}", css_text)
+    seen: set[tuple[str, str]] = set()
+    unique: list[str] = []
+    for block in blocks:
+        family = _re.search(r"font-family:\s*'([^']+)'", block)
+        urange = _re.search(r"unicode-range:\s*([^;]+)", block)
+        key = (family.group(1) if family else "", urange.group(1) if urange else "")
+        if key not in seen:
+            seen.add(key)
+            unique.append(block)
+    return "\n".join(unique)
+
+
+# Combined CSS string cached after first call
+_combined_css: str | None = None
+
+
+def get_auto_font_css_content() -> str | None:
+    """Return a single combined CSS string for missing local fonts.
+
+    Downloads CSS from CDN on first call, rewrites font URLs to point
+    to the local ``/fonts/fontsource/`` endpoint, deduplicates overlapping
+    ``@font-face`` rules, and caches the result. Subsequent calls return
+    cached content with no network access.
     """
-    global _auto_css_urls, _auto_detected, _needs_emoji_serving
+    global _combined_css, _auto_detected, _needs_emoji_serving
 
     if _auto_detected:
-        return _auto_css_urls or []
+        return _combined_css
 
     _auto_detected = True
 
     explicit = settings.font_css
     if explicit:
-        _auto_css_urls = [u.strip() for u in explicit.split(",") if u.strip()]
-        logger.info(
-            "Using explicit VEILRENDER_FONT_CSS: %d URL(s)", len(_auto_css_urls)
-        )
-        return _auto_css_urls
+        _combined_css = None
+        logger.info("Using explicit VEILRENDER_FONT_CSS (external URLs)")
+        return _combined_css
 
-    missing = _detect_missing_fonts()
+    missing_langs = _detect_missing_fonts()
     _needs_emoji_serving = not has_local_emoji()
 
-    if not missing and not _needs_emoji_serving:
+    if not missing_langs and not _needs_emoji_serving:
         logger.info("All font scripts detected locally, no CSS injection needed")
-        _auto_css_urls = []
-        return []
+        _combined_css = None
+        return None
 
-    _auto_css_urls = missing
-    logger.info(
-        "Auto-detected %d missing font scripts%s, will inject CSS on screenshots",
-        len(missing),
-        " + emoji via gateway serving" if _needs_emoji_serving else "",
-    )
-    return _auto_css_urls
+    parts: list[str] = []
+    for lang in missing_langs:
+        css = _load_font_css(lang)
+        if css:
+            parts.append(css)
+
+    if parts:
+        _combined_css = _dedup_font_faces("\n".join(parts))
+        logger.info(
+            "Loaded and deduped font CSS (%d bytes from %d scripts)%s",
+            len(_combined_css),
+            len(parts),
+            " + emoji via gateway serving" if _needs_emoji_serving else "",
+        )
+    else:
+        _combined_css = None
+
+    return _combined_css
+
+
+def get_auto_font_css_urls() -> list[str]:
+    """Return external CSS URLs for missing local fonts (legacy).
+
+    Prefer :func:`get_auto_font_css_content` for inline injection.
+    """
+    get_auto_font_css_content()
+    return []
 
 
 def get_emoji_font_css(host: str, forwarded_proto: str = "") -> str | None:
-    """Return inline @font-face CSS for emoji, served from gateway.
-
-    Args:
-        host: The gateway's Host header (e.g. ``localhost:7860``).
-        forwarded_proto: Value of ``X-Forwarded-Proto`` header, if behind
-            a reverse proxy. Falls back to port-based heuristic.
-
-    Returns:
-        Inline CSS string, or None if emoji font is available locally.
-    """
-    get_auto_font_css_urls()
+    """Return inline @font-face CSS for emoji, served from gateway."""
+    get_auto_font_css_content()
     if not _needs_emoji_serving:
         return None
     if forwarded_proto:

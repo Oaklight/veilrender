@@ -39,6 +39,9 @@ _KNOWN_FONTS: dict[str, str] = {
     "noto-sans-kr.ttf": FONT_REGISTRY["noto-sans-kr"],
 }
 
+_FONTSOURCE_BASE = "https://cdn.jsdelivr.net/npm/@fontsource"
+_FONTSOURCE_CACHE = Path(settings.font_dir) / "fontsource"
+
 
 def _find_font(filename: str) -> Path | None:
     """Search font directories for a file by name."""
@@ -93,8 +96,76 @@ def _download_font(filename: str) -> Path | None:
         return None
 
 
+def _download_fontsource_file(font_name: str, filename: str) -> Path | None:
+    """Download a fontsource woff2/woff file on-demand, cache locally."""
+    cache_dir = _FONTSOURCE_CACHE / font_name
+    dest = cache_dir / filename
+    if dest.exists():
+        return dest
+
+    url = f"{_FONTSOURCE_BASE}/{font_name}/files/{filename}"
+    if settings.font_mirror:
+        url = f"{settings.font_mirror}/{url}"
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("On-demand fontsource download: %s/%s", font_name, filename)
+    try:
+        resp = urllib.request.urlopen(url, timeout=30)
+        tmp = dest.with_suffix(".tmp")
+        tmp.write_bytes(resp.read())
+        tmp.rename(dest)
+        return dest
+    except Exception:
+        logger.warning(
+            "Failed to download fontsource %s/%s", font_name, filename, exc_info=True
+        )
+        return None
+
+
 def register(app: App) -> None:
-    """Register font serving route on the app."""
+    """Register font serving routes on the app."""
+
+    @app.get("/fonts/fontsource/<path:rest>")
+    async def serve_fontsource(request: Request, rest: str = "") -> Response:
+        parts = rest.split("/", 1)
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            return Response(
+                body=b'{"error": "Invalid path"}',
+                status_code=400,
+                content_type="application/json",
+            )
+        font_name, filename = parts
+        if ".." in filename or "/" in filename:
+            return Response(
+                body=b'{"error": "Invalid filename"}',
+                status_code=400,
+                content_type="application/json",
+            )
+
+        cached = _FONTSOURCE_CACHE / font_name / filename
+        if not cached.exists():
+            cached_path = await asyncio.to_thread(
+                _download_fontsource_file, font_name, filename
+            )
+            if cached_path is None:
+                return Response(
+                    body=b'{"error": "Font file not found"}',
+                    status_code=404,
+                    content_type="application/json",
+                )
+            cached = cached_path
+
+        suffix = cached.suffix.lower()
+        content_type = _MIME_TYPES.get(suffix, "application/octet-stream")
+        return Response(
+            body=cached.read_bytes(),
+            status_code=200,
+            content_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=604800",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
 
     @app.get("/fonts/<path:filename>")
     async def serve_font(request: Request, filename: str = "") -> Response:
