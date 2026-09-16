@@ -26,6 +26,11 @@ from veilrender.filters import load_blocklist, make_route_handler
 
 logger = logging.getLogger(__name__)
 
+
+class QueueFullError(Exception):
+    """Raised when the request queue depth limit is reached."""
+
+
 WaitUntil = Literal["commit", "domcontentloaded", "load", "networkidle"]
 
 CDP_PORT = 9222
@@ -781,6 +786,7 @@ class BrowserManager:
             self._is_local = True
 
         self._health_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._queue_depth: int = 0
 
         if settings.resource_filter:
             self._blocklist = load_blocklist(settings.blocked_domains_extra)
@@ -894,6 +900,11 @@ class BrowserManager:
     def total_capacity(self) -> int:
         return sum(w.max_concurrent for w in self._workers if w.healthy)
 
+    @property
+    def queue_depth(self) -> int:
+        """Number of requests waiting for or holding a browser slot."""
+        return self._queue_depth
+
     async def worker_stats(self) -> list[dict]:
         result = []
         for i, w in enumerate(self._workers):
@@ -954,16 +965,22 @@ class BrowserManager:
         color_scheme: str | None = None,
         min_tier: int = 0,
     ) -> AsyncIterator[tuple[BrowserContext, Page, str, WaitUntil | None]]:
-        worker = self._pick_worker(min_tier=min_tier)
-        engine_label = _TIER_LABELS.get(worker.tier, "unknown")
-        async with worker.get_page(
-            viewport_width=viewport_width,
-            viewport_height=viewport_height,
-            device_scale_factor=device_scale_factor,
-            color_scheme=color_scheme,
-            route_handler=self._route_handler,
-        ) as (ctx, page):
-            yield ctx, page, engine_label, worker.force_wait_until
+        if settings.max_queue > 0 and self._queue_depth >= settings.max_queue:
+            raise QueueFullError("Request queue depth limit reached")
+        self._queue_depth += 1
+        try:
+            worker = self._pick_worker(min_tier=min_tier)
+            engine_label = _TIER_LABELS.get(worker.tier, "unknown")
+            async with worker.get_page(
+                viewport_width=viewport_width,
+                viewport_height=viewport_height,
+                device_scale_factor=device_scale_factor,
+                color_scheme=color_scheme,
+                route_handler=self._route_handler,
+            ) as (ctx, page):
+                yield ctx, page, engine_label, worker.force_wait_until
+        finally:
+            self._queue_depth -= 1
 
 
 browser_manager = BrowserManager()

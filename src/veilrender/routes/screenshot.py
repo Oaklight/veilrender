@@ -11,7 +11,7 @@ from typing import Any
 from veilrender._vendor.httpserver import App, Request, Response
 from veilrender import stats
 from veilrender.auth import verify_token
-from veilrender.browser import browser_manager
+from veilrender.browser import QueueFullError, browser_manager
 from veilrender.config import settings
 from veilrender.fonts import get_auto_font_css_urls, get_emoji_font_css
 from veilrender.models import ScreenshotRequest
@@ -153,6 +153,15 @@ def register(app: App) -> None:
         try:
             image_bytes, engine = await asyncio.wait_for(
                 _screenshot_pipeline(), timeout=settings.request_deadline
+            )
+        except QueueFullError:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.screenshot.record_failure(elapsed)
+            return Response(
+                body=b'{"error": "Server overloaded, try again later"}',
+                status_code=503,
+                content_type="application/json",
+                headers={"Retry-After": "5"},
             )
         except TimeoutError:
             elapsed = (time.monotonic() - t0) * 1000

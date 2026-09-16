@@ -45,6 +45,9 @@ class Settings:
         )
         self.max_concurrent: int = int(os.environ.get("VEILRENDER_MAX_CONCURRENT", "5"))
 
+        # Queue depth limit — 0 means unlimited
+        self.max_queue: int = int(os.environ.get("VEILRENDER_MAX_QUEUE", "0"))
+
         # Remote browser worker pool
         # Format: cdp://host:9222,playwright://host:1234/ws-path
         # No prefix or http:// defaults to cdp://
