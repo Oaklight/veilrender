@@ -12,6 +12,7 @@ from veilrender._vendor.httpserver import App, Request, Response
 from veilrender import stats
 from veilrender.auth import verify_token
 from veilrender.browser import QueueFullError, browser_manager
+from veilrender.ratelimit import check_rate_limit
 from veilrender.config import settings
 from veilrender.fonts import get_auto_font_css_urls, get_emoji_font_css
 from veilrender.models import ScreenshotRequest
@@ -31,6 +32,10 @@ def register(app: App) -> None:
     @app.post("/screenshot")
     async def screenshot(request: Request) -> Response:
         verify_token(request)
+
+        rate_limit_response = check_rate_limit(request)
+        if rate_limit_response is not None:
+            return rate_limit_response
 
         try:
             data = request.json()
