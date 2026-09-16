@@ -19,67 +19,15 @@ Render JavaScript-heavy or bot-protected pages via a VeilRender API instance.
 Use this when `curl`/`fetch` returns empty or incomplete content because the
 page requires a real browser to render.
 
-VeilRender uses a **two-tier browser system**: lightweight Obscura (Rust) as
-tier-0 for fast renders (~85ms), falling back to CloakBrowser/Camoufox as
-tier-1 when needed. The tier used is reported in the `X-Render-Engine` response
-header (`alpha` = tier 0, `beta` = tier 1) when enabled on the instance.
+Two-tier stealth browser: Obscura (Rust, tier 0, ~85ms) with automatic
+fallback to Chromium/Firefox (tier 1). `X-Render-Engine` header reports
+`alpha` (tier 0) or `beta` (tier 1) when enabled.
 
 ## Setup
 
-Configuration is persisted in `~/.config/veilrender/config.json` so
-the user only needs to answer once.
+Config persisted in `~/.config/veilrender/config.json` (`0600`).
 
-**Step 1**: Load saved config (or detect env vars):
-```bash
-python3 -c "
-import json, os, pathlib
-cfg_path = pathlib.Path.home() / '.config' / 'veilrender' / 'config.json'
-url = os.environ.get('VEILRENDER_URL', '')
-token = os.environ.get('VEILRENDER_TOKEN', '')
-if not url and cfg_path.exists():
-    cfg = json.loads(cfg_path.read_text())
-    url = cfg.get('url', '')
-    token = cfg.get('token', '')
-print(f'URL: {url or \"not set\"}')
-print(f'Token: {\"configured\" if token else \"not set\"}')
-"
-```
-
-**Step 2**: If URL is missing, **ask the user**:
-- "Do you have a hosted VeilRender instance? If so, what is the URL and API token?"
-- If they don't have one, suggest self-hosting:
-  ```bash
-  docker run -d -p 7860:7860 \
-    -e VEILRENDER_API_TOKEN=changeme \
-    -e VEILRENDER_OBSCURA=true \
-    oaklight/veilrender:latest
-  ```
-
-**Step 3**: Save the config so it persists across sessions:
-```bash
-python3 -c "
-import json, os, pathlib
-cfg_dir = pathlib.Path.home() / '.config' / 'veilrender'
-cfg_dir.mkdir(parents=True, exist_ok=True)
-cfg_path = cfg_dir / 'config.json'
-cfg = {'url': '$URL', 'token': '$TOKEN'}
-cfg_path.write_text(json.dumps(cfg, indent=2))
-os.chmod(cfg_path, 0o600)
-print(f'Saved to {cfg_path}')
-"
-```
-
-**Step 4**: Verify connectivity:
-```bash
-curl -sf "$VEILRENDER_URL/health" | jq .
-# Expected: {"status": "ok"}
-```
-
-If health check fails, do NOT proceed — ask the user to check their instance.
-
-### Loading config in commands
-
-Before every curl call, load the config:
+Load saved config (or detect env vars), then verify:
 ```bash
 eval $(python3 -c "
 import json, os, pathlib
@@ -91,27 +39,25 @@ token = os.environ.get('VEILRENDER_TOKEN') or cfg.get('token', '')
 print(f'export VEILRENDER_URL=\"{url}\"')
 print(f'export VEILRENDER_TOKEN=\"{token}\"')
 ")
+curl -sf "$VEILRENDER_URL/health" | jq .
 ```
 
-### Config file
-
-| Path | Format | Permissions |
-|------|--------|-------------|
-| `~/.config/veilrender/config.json` | JSON | `0600` (owner-only) |
-
-```json
-{
-  "url": "https://your-instance.example.com",
-  "token": "your-api-token"
-}
+If URL is missing, ask the user. Self-hosting option:
+```bash
+docker run -d -p 7860:7860 -e VEILRENDER_API_TOKEN=changeme -e VEILRENDER_OBSCURA=true oaklight/veilrender:latest
 ```
 
-Environment variables (`VEILRENDER_URL`, `VEILRENDER_TOKEN`) override
-the config file when set.
+Save config:
+```bash
+python3 -c "
+import json, os, pathlib
+d = pathlib.Path.home() / '.config' / 'veilrender'; d.mkdir(parents=True, exist_ok=True)
+p = d / 'config.json'; p.write_text(json.dumps({'url': '$URL', 'token': '$TOKEN'}, indent=2))
+os.chmod(p, 0o600); print(f'Saved to {p}')
+"
+```
 
 ## Render a page
-
-Returns rendered HTML, Markdown, and/or readability-extracted article text.
 
 ```bash
 curl -s -X POST "$VEILRENDER_URL/render" \
@@ -120,167 +66,68 @@ curl -s -X POST "$VEILRENDER_URL/render" \
   -d '{"url": "https://example.com", "formats": ["readability"]}' | jq .
 ```
 
-### Request body
-
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `url` | string | *(required)* | URL to render |
 | `formats` | string[] | `["html"]` | `html`, `readability`, `markdown` |
 | `wait_until` | string | `"load"` | `load`, `domcontentloaded`, `networkidle` |
-| `timeout` | int | `30000` | Navigation timeout in milliseconds |
+| `timeout` | int | `30000` | Navigation timeout (ms) |
 
-### Response
-
-```json
-{
-  "content": {
-    "html": "<html>...",
-    "readability": "Article text...",
-    "markdown": "# Title\n..."
-  },
-  "metadata": {
-    "title": "Page Title",
-    "url": "https://example.com/",
-    "status_code": 200
-  },
-  "links": [{"url": "https://...", "text": "Link text"}]
-}
-```
-
-**Response headers** (when `VEILRENDER_ENGINE_HEADER=true` on the instance):
-- `X-Render-Engine: alpha` — rendered by Obscura (tier 0)
-- `X-Render-Engine: beta` — rendered by CloakBrowser/Camoufox (tier 1)
+Response: `{"content": {"html": "...", "readability": "...", "markdown": "..."}, "metadata": {"title": "...", "url": "...", "status_code": 200}, "links": [...]}`
 
 ## Take a screenshot
 
-Returns a PNG or JPEG image of the rendered page.
-
 ```bash
-# Default PNG screenshot
+# PNG (default)
 curl -s -X POST "$VEILRENDER_URL/screenshot" \
   -H "Authorization: Bearer $VEILRENDER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"url": "https://example.com"}' -o screenshot.png
 
-# JPEG with quality control
-curl -s -X POST "$VEILRENDER_URL/screenshot" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "format": "jpeg", "quality": 80}' -o screenshot.jpg
-
-# Full-page capture
-curl -s -X POST "$VEILRENDER_URL/screenshot" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "full_page": true}' -o fullpage.png
-
-# Element screenshot
-curl -s -X POST "$VEILRENDER_URL/screenshot" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "selector": "#main-content"}' -o element.png
-
-# Dark mode, retina scale
-curl -s -X POST "$VEILRENDER_URL/screenshot" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://example.com", "color_scheme": "dark", "scale": 2}' -o dark-retina.png
+# Full-page, JPEG, dark mode, retina — combine options as needed:
+# "full_page": true, "format": "jpeg", "quality": 80,
+# "color_scheme": "dark", "scale": 2, "selector": "#main",
+# "clip": {"x":0,"y":0,"width":400,"height":300}, "transparent": true
 ```
-
-### Screenshot options
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `url` | string | *(required)* | URL to screenshot |
-| `format` | string | `"png"` | Image format: `png`, `jpeg` |
-| `quality` | int | — | JPEG quality 0–100 (only for `jpeg`) |
-| `full_page` | bool | `false` | Capture full scrollable page |
-| `scale` | float | — | Device pixel ratio (e.g. `2` for retina, max `8`) |
-| `selector` | string | — | CSS selector to screenshot a specific element |
-| `clip` | object | — | Region: `{"x": N, "y": N, "width": N, "height": N}` |
-| `color_scheme` | string | — | `"light"`, `"dark"`, or `"no-preference"` |
-| `wait_for` | string | — | CSS selector to wait for before capture |
-| `transparent` | bool | `false` | Transparent background (PNG only) |
-| `timeout` | int | `30000` | Navigation timeout in milliseconds |
-| `viewport_width` | int | `1280` | Override viewport width |
-| `viewport_height` | int | `720` | Override viewport height |
-
-## Check service health
-
-```bash
-curl -s "$VEILRENDER_URL/health" | jq .
-# {"status": "ok"}
-```
-
-## Common patterns
-
-### Render a JS-heavy page when fetch fails
-
-```bash
-# Plain fetch returns empty/broken content
-curl -s https://spa-site.com  # → empty or loading spinner HTML
-
-# Use VeilRender to get the fully rendered page
-curl -s -X POST "$VEILRENDER_URL/render" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://spa-site.com", "formats": ["readability"], "wait_until": "networkidle"}' \
-  | jq -r '.content.readability'
-```
-
-### Extract article text for LLM consumption
-
-```bash
-curl -s -X POST "$VEILRENDER_URL/render" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"url\": \"$URL\", \"formats\": [\"readability\"]}" \
-  | jq -r '.content.readability'
-```
-
-### Batch render multiple URLs
-
-```bash
-for url in "https://site1.com" "https://site2.com" "https://site3.com"; do
-  echo "=== $url ==="
-  curl -s -X POST "$VEILRENDER_URL/render" \
-    -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"url\": \"$url\", \"formats\": [\"readability\"]}" \
-    | jq -r '.metadata.title + ": " + (.content.readability | length | tostring) + " chars"'
-done
-```
-
-### Screenshot with custom timeout for slow pages
-
-```bash
-curl -s -X POST "$VEILRENDER_URL/screenshot" \
-  -H "Authorization: Bearer $VEILRENDER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://slow-site.com", "timeout": 45000, "full_page": true}' \
-  -o screenshot.png
-```
+| `format` | string | `"png"` | `png`, `jpeg` |
+| `quality` | int | — | JPEG quality 0–100 |
+| `full_page` | bool | `false` | Full scrollable page |
+| `scale` | float | — | Device pixel ratio (max `8`) |
+| `selector` | string | — | CSS selector for element screenshot |
+| `clip` | object | — | `{"x", "y", "width", "height"}` |
+| `color_scheme` | string | — | `light`, `dark`, `no-preference` |
+| `wait_for` | string | — | CSS selector to wait for |
+| `transparent` | bool | `false` | Transparent background (PNG) |
+| `timeout` | int | `30000` | Navigation timeout (ms) |
+| `viewport_width` | int | `1280` | Viewport width |
+| `viewport_height` | int | `720` | Viewport height |
 
 ## Error handling
 
-| HTTP Code | Meaning |
-|-----------|---------|
-| 200 | Success |
-| 400 | Invalid request (bad URL, missing fields, blocked scheme) |
-| 403 | Invalid or missing API token |
-| 429 | Rate limit exceeded — check `Retry-After` header |
-| 502 | Browser rendering failed (crash, blocked URL) |
-| 503 | Server overloaded (queue depth limit) — check `Retry-After` header |
-| 504 | Request deadline exceeded (default 45s hard ceiling) |
+| Code | Meaning | Action |
+|------|---------|--------|
+| 200 | Success | — |
+| 400 | Bad request (invalid URL, blocked scheme) | Fix request |
+| 403 | Auth failed | Check token |
+| 429 | Rate limited | Wait `Retry-After` seconds |
+| 502 | Browser render failed | Try different URL or longer `timeout` |
+| 503 | Server overloaded | Wait `Retry-After` seconds |
+| 504 | Request deadline exceeded (45s) | Page too slow |
 
-On 502, check if the URL is accessible and try with a longer `timeout`.
-On 429/503, wait for the `Retry-After` duration before retrying.
-On 504, the page is too slow for the configured deadline — consider simpler pages or raising the server's `VEILRENDER_REQUEST_DEADLINE`.
+## Other endpoints
+
+- `GET /health` → `{"status": "ok"}`
+- `GET /stats` → JSON dashboard data (tiers, queue depth, latency)
+- `GET /metrics` → Prometheus exposition format
+- `GET /` → Stats dashboard (no auth)
 
 ## Notes
 
-- VeilRender uses a two-tier stealth browser system — Obscura (Rust, tier 0) for speed, with automatic fallback to full Chromium/Firefox (tier 1) for compatibility. Both tiers include anti-detection
-- Pages with CAPTCHAs may still fail; consider adding a residential proxy
-- The service blocks ad/tracker domains by default (`VEILRENDER_RESOURCE_FILTER=true`)
-- Stats dashboard available at `$VEILRENDER_URL/` (no auth needed for the dashboard)
-- Font CSS for CJK/Arabic/Thai/Hindi is cached locally — no external network during screenshots after first load
+- Two-tier stealth: Obscura (tier 0) for speed, Chromium/Firefox (tier 1) for compatibility — both include anti-detection
+- Ad/tracker domains blocked by default (`VEILRENDER_RESOURCE_FILTER=true`)
+- Font CSS cached locally — no external network during screenshots after first load
+- CAPTCHAs may still block; residential proxies help
