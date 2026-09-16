@@ -75,6 +75,15 @@ def register(app: App) -> None:
             *, min_tier: int = 0, tier_timeout: int | None = None
         ) -> tuple[bytes, str]:
             t = tier_timeout or timeout
+
+            # Full-page screenshots need extra time for scrolling and
+            # compositing the entire page.  Reserve part of the navigation
+            # timeout so the capture step isn't starved after a slow load.
+            _FULL_PAGE_BUFFER_MS = 10_000
+            goto_timeout = t
+            if req.full_page:
+                goto_timeout = max(t - _FULL_PAGE_BUFFER_MS, t // 2)
+
             async with browser_manager.get_page(
                 viewport_width=req.viewport_width,
                 viewport_height=req.viewport_height,
@@ -86,7 +95,7 @@ def register(app: App) -> None:
                 await page.goto(
                     req.url,
                     wait_until=effective_wu,
-                    timeout=t,
+                    timeout=goto_timeout,
                 )
                 css_urls = [req.font_css] if req.font_css else get_auto_font_css_urls()
                 host = request.headers.get("host", "")
@@ -120,6 +129,15 @@ def register(app: App) -> None:
                         "width": req.clip.width,
                         "height": req.clip.height,
                     }
+
+                # Give the screenshot call an explicit timeout derived from
+                # the remaining request deadline so it doesn't blindly use
+                # Playwright's 30 s default after navigation already consumed
+                # most of the budget.
+                if req.full_page:
+                    elapsed_ms = (time.monotonic() - t0) * 1000
+                    remaining_ms = settings.request_deadline * 1000 - elapsed_ms
+                    screenshot_kwargs["timeout"] = max(int(remaining_ms) - 1000, 5000)
 
                 if req.selector:
                     locator = page.locator(req.selector)
