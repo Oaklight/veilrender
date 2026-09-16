@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Speculative tier-0 racing** — Obscura gets `VEILRENDER_OBSCURA_TIMEOUT` ms (default 10s) to succeed; if slow, tier-1 starts immediately and the first to finish wins ([#45])
+- **Hard request deadline** — `VEILRENDER_REQUEST_DEADLINE` (default 45s) wraps the entire render/screenshot pipeline; returns 504 if exceeded ([#46])
+- **CDP proxy tier routing** — `/cdp` defaults to tier-1 (CloakBrowser) for full Chromium compatibility; `?tier=0` opts into Obscura ([#50])
+- `ObscuraWorker.force_wait_until = "load"` — forces Obscura to use `load` instead of `networkidle` to prevent CDP hangs ([#45])
+- Stuck worker detection — health loop detects workers with stale active slot count for >2× timeout and force-restarts them ([#45])
+- `WaitUntil` type alias for Playwright's `wait_until` parameter ([#45])
+- Test release workflow (`test-release.yml`) for TestPyPI + dev Docker images
+
+### Fixed
+
+- **Semaphore slot leaks** — `asyncio.shield` prevented cancellation of tier-0 tasks; replaced with direct cancel + fire-and-forget for unresponsive Obscura CDP
+- Stuck detection only triggered on full occupancy (all slots); now triggers on any stale active count
+
+### Changed
+
+- `BrowserManager.get_cdp_url()` gains `min_tier` parameter (default 1) ([#50])
+- `BrowserManager.get_page()` yields 4-tuple `(ctx, page, engine_label, force_wait_until)` ([#45])
+- Render/screenshot pipeline extracted into `_render_pipeline()` / `_screenshot_pipeline()` for deadline wrapping ([#46])
+
 ## [0.6.0] - 2026-09-15
 
 ### Added
@@ -222,3 +243,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#42]: https://github.com/Oaklight/veilrender/pull/42
 [#43]: https://github.com/Oaklight/veilrender/pull/43
 [#44]: https://github.com/Oaklight/veilrender/pull/44
+[#45]: https://github.com/Oaklight/veilrender/pull/45
+[#46]: https://github.com/Oaklight/veilrender/issues/46
+[#50]: https://github.com/Oaklight/veilrender/issues/50
+[#51]: https://github.com/Oaklight/veilrender/pull/51
