@@ -45,6 +45,7 @@ async def _stats_json() -> dict:
             "/render": _ep_dict(stats.render),
             "/screenshot": _ep_dict(stats.screenshot),
         },
+        "queue_depth": browser_manager.queue_depth,
         "workers": await browser_manager.worker_stats(),
         "tiers": browser_manager.tier_stats(),
     }

@@ -12,7 +12,7 @@ from veilrender._vendor.readability import extract as readability_extract
 from veilrender._vendor.soup import Soup
 from veilrender import stats
 from veilrender.auth import verify_token
-from veilrender.browser import browser_manager
+from veilrender.browser import QueueFullError, browser_manager
 from veilrender.config import settings
 from veilrender.models import (
     LinkInfo,
@@ -141,6 +141,14 @@ def register(app: App) -> None:
         try:
             status_code, title, final_url, html, engine = await asyncio.wait_for(
                 _render_pipeline(), timeout=settings.request_deadline
+            )
+        except QueueFullError:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.render.record_failure(elapsed)
+            return JSONResponse(
+                {"error": "Server overloaded, try again later"},
+                status_code=503,
+                headers={"Retry-After": "5"},
             )
         except TimeoutError:
             elapsed = (time.monotonic() - t0) * 1000
