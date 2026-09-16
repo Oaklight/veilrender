@@ -7,12 +7,13 @@ import logging
 import re
 import time
 
-from veilrender._vendor.httpserver import App, JSONResponse, Request
+from veilrender._vendor.httpserver import App, JSONResponse, Request, Response
 from veilrender._vendor.readability import extract as readability_extract
 from veilrender._vendor.soup import Soup
 from veilrender import stats
 from veilrender.auth import verify_token
 from veilrender.browser import QueueFullError, browser_manager
+from veilrender.ratelimit import check_rate_limit
 from veilrender.config import settings
 from veilrender.models import (
     LinkInfo,
@@ -62,8 +63,12 @@ def register(app: App) -> None:
     """Register render routes on the app."""
 
     @app.post("/render")
-    async def render(request: Request) -> JSONResponse:
+    async def render(request: Request) -> Response:
         verify_token(request)
+
+        rate_limit_response = check_rate_limit(request)
+        if rate_limit_response is not None:
+            return rate_limit_response
 
         try:
             data = request.json()

@@ -122,6 +122,12 @@ class Settings:
             os.environ.get("VEILRENDER_CACHE_L1_MAXSIZE", "100")
         )
 
+        # Per-IP request rate limiting
+        # Format: "N/S" where N = max requests, S = window in seconds
+        # Example: "10/60" = 10 requests per 60 seconds
+        # Empty string (default) = rate limiting disabled
+        self.rate_limit: str = os.environ.get("VEILRENDER_RATE_LIMIT", "")
+
         # S3-compatible storage (Cloudflare R2, Oracle Object Storage, etc.)
         self.s3_endpoint: str | None = os.environ.get("VEILRENDER_S3_ENDPOINT")
         self.s3_access_key: str | None = os.environ.get("VEILRENDER_S3_ACCESS_KEY")
