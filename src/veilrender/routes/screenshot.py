@@ -102,16 +102,28 @@ def register(app: App) -> None:
                     wait_until=effective_wu,
                     timeout=goto_timeout,
                 )
-                css_urls = [req.font_css] if req.font_css else get_auto_font_css_urls()
-                host = request.headers.get("host", "")
-                proto = request.headers.get("x-forwarded-proto", "")
-                emoji_css = get_emoji_font_css(host, proto)
-                for css_url in css_urls:
-                    await page.add_style_tag(url=css_url)
-                if emoji_css:
-                    await page.add_style_tag(content=emoji_css)
-                if css_urls or emoji_css:
-                    await page.evaluate("() => document.fonts.ready")
+                # Skip font injection on tier-0 (Obscura CDP can't handle
+                # external stylesheet loads reliably) and on full_page
+                # captures (content matters more than typography there).
+                if min_tier > 0 and not req.full_page:
+                    css_urls = (
+                        [req.font_css] if req.font_css else get_auto_font_css_urls()
+                    )
+                    host = request.headers.get("host", "")
+                    proto = request.headers.get("x-forwarded-proto", "")
+                    emoji_css = get_emoji_font_css(host, proto)
+                    try:
+                        for css_url in css_urls:
+                            await page.add_style_tag(url=css_url)
+                        if emoji_css:
+                            await page.add_style_tag(content=emoji_css)
+                        if css_urls or emoji_css:
+                            await asyncio.wait_for(
+                                page.evaluate("() => document.fonts.ready"),
+                                timeout=5,
+                            )
+                    except (TimeoutError, Exception):
+                        logger.debug("Font injection skipped (timeout/error)")
 
                 if req.wait_for:
                     elapsed_ms = (time.monotonic() - t0) * 1000
