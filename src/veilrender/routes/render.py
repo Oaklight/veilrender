@@ -11,6 +11,8 @@ from veilrender._vendor.httpserver import App, JSONResponse, Request, Response
 from veilrender._vendor.readability import extract as readability_extract
 from veilrender._vendor.soup import Soup
 from veilrender import stats
+from patchright.async_api import TimeoutError as PlaywrightTimeoutError
+
 from veilrender.auth import verify_token
 from veilrender.browser import QueueFullError, browser_manager
 from veilrender.ratelimit import check_rate_limit
@@ -103,7 +105,10 @@ def register(app: App) -> None:
             stats.render.cache_misses += 1
 
         async def _do_render(
-            *, min_tier: int = 0, tier_timeout: int | None = None
+            *,
+            min_tier: int = 0,
+            tier_timeout: int | None = None,
+            capture_partial: bool = False,
         ) -> tuple[int, str, str, str, str]:
             t = tier_timeout or timeout
             async with browser_manager.get_page(min_tier=min_tier) as (
@@ -113,12 +118,21 @@ def register(app: App) -> None:
                 force_wu,
             ):
                 effective_wu = force_wu or req.wait_until
-                response = await page.goto(
-                    req.url,
-                    wait_until=effective_wu,
-                    timeout=t,
-                )
-                status_code = response.status if response else 0
+                try:
+                    response = await page.goto(
+                        req.url,
+                        wait_until=effective_wu,
+                        timeout=t,
+                    )
+                    status_code = response.status if response else 0
+                except (TimeoutError, PlaywrightTimeoutError):
+                    if not capture_partial:
+                        raise
+                    status_code = 0
+                    logger.warning(
+                        "Goto timed out for %s, capturing partial content",
+                        req.url,
+                    )
                 title = await page.title()
                 final_url = page.url
                 html = await page.content()
@@ -140,8 +154,8 @@ def register(app: App) -> None:
                     )
                     if not tier0_task.done():
                         tier0_task.cancel()
-                    return await _do_render(min_tier=1)
-            return await _do_render()
+                    return await _do_render(min_tier=1, capture_partial=True)
+            return await _do_render(capture_partial=True)
 
         try:
             status_code, title, final_url, html, engine = await asyncio.wait_for(
