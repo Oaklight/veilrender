@@ -109,7 +109,7 @@ def register(app: App) -> None:
             min_tier: int = 0,
             tier_timeout: int | None = None,
             capture_partial: bool = False,
-        ) -> tuple[int, str, str, str, str]:
+        ) -> tuple[int, str, str, str, str, bool]:
             t = tier_timeout or timeout
             async with browser_manager.get_page(min_tier=min_tier) as (
                 ctx,
@@ -118,6 +118,7 @@ def register(app: App) -> None:
                 force_wu,
             ):
                 effective_wu = force_wu or req.wait_until
+                partial = False
                 try:
                     response = await page.goto(
                         req.url,
@@ -128,6 +129,7 @@ def register(app: App) -> None:
                 except (TimeoutError, PlaywrightTimeoutError):
                     if not capture_partial:
                         raise
+                    partial = True
                     status_code = 0
                     logger.warning(
                         "Goto timed out for %s, capturing partial content",
@@ -136,9 +138,9 @@ def register(app: App) -> None:
                 title = await page.title()
                 final_url = page.url
                 html = await page.content()
-                return status_code, title, final_url, html, engine
+                return status_code, title, final_url, html, engine, partial
 
-        async def _render_pipeline() -> tuple[int, str, str, str, str]:
+        async def _render_pipeline() -> tuple[int, str, str, str, str, bool]:
             if browser_manager.has_fallback_tier(0):
                 tier0_timeout = min(settings.obscura_timeout, timeout)
                 tier0_task = asyncio.create_task(_do_render(tier_timeout=tier0_timeout))
@@ -158,7 +160,14 @@ def register(app: App) -> None:
             return await _do_render(capture_partial=True)
 
         try:
-            status_code, title, final_url, html, engine = await asyncio.wait_for(
+            (
+                status_code,
+                title,
+                final_url,
+                html,
+                engine,
+                partial,
+            ) = await asyncio.wait_for(
                 _render_pipeline(), timeout=settings.request_deadline
             )
         except QueueFullError:
@@ -218,6 +227,7 @@ def register(app: App) -> None:
                 title=title,
                 url=final_url,
                 status_code=status_code,
+                partial=partial,
             ),
             links=links,
         )
