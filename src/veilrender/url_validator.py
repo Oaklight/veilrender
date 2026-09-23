@@ -18,9 +18,43 @@ logger = logging.getLogger(__name__)
 
 _ALLOWED_SCHEMES = {"http", "https"}
 
+_BINARY_EXTENSIONS = frozenset(
+    {
+        ".parquet",
+        ".zip",
+        ".tar.gz",
+        ".tgz",
+        ".7z",
+        ".rar",
+        ".bz2",
+        ".xz",
+        ".gz",
+        ".exe",
+        ".msi",
+        ".dmg",
+        ".deb",
+        ".rpm",
+        ".bin",
+        ".iso",
+        ".whl",
+        ".egg",
+        ".apk",
+        ".ipa",
+    }
+)
+
 
 class URLValidationError(Exception):
     """Raised when a URL fails validation."""
+
+
+def _has_binary_extension(path: str) -> str | None:
+    """Return the matched binary extension, or None."""
+    lower = path.lower()
+    for ext in sorted(_BINARY_EXTENSIONS, key=len, reverse=True):
+        if lower.endswith(ext):
+            return ext
+    return None
 
 
 def validate_url(url: str) -> str:
@@ -52,6 +86,13 @@ def validate_url(url: str) -> str:
 
     # Resolve DNS and check against private IP ranges
     _check_resolved_ips(hostname)
+
+    # Reject URLs pointing to binary/downloadable files
+    ext = _has_binary_extension(parsed.path)
+    if ext:
+        raise URLValidationError(
+            f"URL points to a binary file ({ext}), not a renderable page"
+        )
 
     return url
 

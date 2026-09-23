@@ -340,6 +340,7 @@ class _BaseWorker:
             context: BrowserContext | None = None
             try:
                 context_kwargs: dict[str, Any] = {
+                    "accept_downloads": False,
                     "viewport": {
                         "width": viewport_width or settings.viewport_width,
                         "height": viewport_height or settings.viewport_height,

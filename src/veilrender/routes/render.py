@@ -166,9 +166,15 @@ def register(app: App) -> None:
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
             stats.render.record_failure(elapsed)
+            exc_str = str(exc)
+            if "Download is starting" in exc_str:
+                return JSONResponse(
+                    {"error": "URL triggers a file download, not a renderable page"},
+                    status_code=400,
+                )
             logger.error("Render failed for %s: %s", req.url, exc)
             return JSONResponse(
-                {"error": f"Render failed: {exc!s}"},
+                {"error": f"Render failed: {exc_str}"},
                 status_code=502,
             )
 
