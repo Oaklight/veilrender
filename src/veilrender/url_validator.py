@@ -84,15 +84,15 @@ def validate_url(url: str) -> str:
     if not hostname:
         raise URLValidationError("Missing hostname")
 
-    # Resolve DNS and check against private IP ranges
-    _check_resolved_ips(hostname)
-
-    # Reject URLs pointing to binary/downloadable files
+    # Reject URLs pointing to binary/downloadable files (before DNS to skip the round-trip)
     ext = _has_binary_extension(parsed.path)
     if ext:
         raise URLValidationError(
             f"URL points to a binary file ({ext}), not a renderable page"
         )
+
+    # Resolve DNS and check against private IP ranges
+    _check_resolved_ips(hostname)
 
     return url
 
