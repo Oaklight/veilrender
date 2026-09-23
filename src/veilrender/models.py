@@ -167,6 +167,7 @@ class PageMetadata:
     title: str
     url: str
     status_code: int
+    partial: bool = False
 
 
 @dataclass
@@ -202,6 +203,7 @@ class RenderResponse:
                 "title": self.metadata.title,
                 "url": self.metadata.url,
                 "status_code": self.metadata.status_code,
+                **({"partial": True} if self.metadata.partial else {}),
             },
             "links": [{"url": link.url, "text": link.text} for link in self.links],
         }
