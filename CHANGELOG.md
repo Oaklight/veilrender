@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-09-24
+
+### Added
+
+- **Partial content capture on timeout** — when `page.goto()` times out on the final render attempt (tier-1 or single-worker), the DOM is captured as-is instead of returning a 502. Useful for JS-heavy SPAs that render meaningful content before `networkidle` fires. Response includes `metadata.partial: true` to signal incomplete capture ([#57], [#59])
+
+### Fixed
+
+- **Browser downloads disabled** — `accept_downloads=False` set on all browser contexts; binary file extensions (`.parquet`, `.zip`, `.tar.gz`, etc.) rejected with 400 before allocating a browser slot; Playwright's "Download is starting" error returns 400 instead of 502 ([#56], [#58])
+- **Font URL dynamic resolution** — font download URLs now resolved via GitHub Contents API instead of hardcoded jsDelivr paths. Fixes broken downloads for `noto-color-emoji` (moved + renamed), `noto-sans-arabic/thai/devanagari` (filename changed), and all variable fonts (jsDelivr 403 on large files). Directory listings cached per path; supports `GITHUB_TOKEN` for authenticated API access ([#60])
+
 ## [0.6.1] - 2026-09-16
 
 ### Added
@@ -208,7 +219,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/Oaklight/veilrender/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Oaklight/veilrender/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Oaklight/veilrender/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/Oaklight/veilrender/compare/v0.5.0...v0.5.1
@@ -261,3 +273,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [#52]: https://github.com/Oaklight/veilrender/pull/52
 [#53]: https://github.com/Oaklight/veilrender/pull/53
 [#54]: https://github.com/Oaklight/veilrender/pull/54
+[#56]: https://github.com/Oaklight/veilrender/issues/56
+[#57]: https://github.com/Oaklight/veilrender/issues/57
+[#58]: https://github.com/Oaklight/veilrender/pull/58
+[#59]: https://github.com/Oaklight/veilrender/pull/59
+[#60]: https://github.com/Oaklight/veilrender/pull/60
