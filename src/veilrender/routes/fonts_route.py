@@ -15,7 +15,7 @@ from pathlib import Path
 
 from veilrender._vendor.httpserver import App, Request, Response
 from veilrender.config import settings
-from veilrender.fonts import FONT_REGISTRY
+from veilrender.fonts import FONT_REGISTRY, _resolve_github_font_url
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ _MIME_TYPES = {
     ".woff2": "font/woff2",
 }
 
-_KNOWN_FONTS: dict[str, str] = {
-    "NotoColorEmoji.ttf": FONT_REGISTRY["noto-color-emoji"],
-    "noto-sans-sc.ttf": FONT_REGISTRY["noto-sans-sc"],
-    "noto-sans-tc.ttf": FONT_REGISTRY["noto-sans-tc"],
-    "noto-sans-jp.ttf": FONT_REGISTRY["noto-sans-jp"],
-    "noto-sans-kr.ttf": FONT_REGISTRY["noto-sans-kr"],
-}
+_KNOWN_FONT_KEYS = [
+    "noto-color-emoji",
+    "noto-sans-sc",
+    "noto-sans-tc",
+    "noto-sans-jp",
+    "noto-sans-kr",
+]
 
 _FONTSOURCE_BASE = "https://cdn.jsdelivr.net/npm/@fontsource"
 _FONTSOURCE_CACHE = Path(settings.font_dir) / "fontsource"
@@ -62,14 +62,19 @@ def _find_font(filename: str) -> Path | None:
 
 def _download_font(filename: str) -> Path | None:
     """Download a known font on-demand, cache in font_dir."""
-    url = _KNOWN_FONTS.get(filename)
-    if not url:
+    resolved_url: str | None = None
+    for key in _KNOWN_FONT_KEYS:
+        spec = FONT_REGISTRY[key]
+        resolved_name, resolved = _resolve_github_font_url(key, spec)
+        if resolved_name == filename:
+            resolved_url = resolved
+            break
+
+    if not resolved_url:
         return None
 
-    # Proxy-style mirror: prefixes the full URL, e.g.
-    # VEILRENDER_FONT_MIRROR=https://ghfast.top → ghfast.top/https://cdn.jsdelivr.net/...
     if settings.font_mirror:
-        url = f"{settings.font_mirror}/{url}"
+        resolved_url = f"{settings.font_mirror}/{resolved_url}"
 
     font_dir = Path(settings.font_dir)
     font_dir.mkdir(parents=True, exist_ok=True)
@@ -80,7 +85,7 @@ def _download_font(filename: str) -> Path | None:
 
     logger.info("On-demand font download: %s", filename)
     try:
-        resp = urllib.request.urlopen(url, timeout=60)
+        resp = urllib.request.urlopen(resolved_url, timeout=60)
         tmp = dest.with_suffix(".tmp")
         tmp.write_bytes(resp.read())
         tmp.rename(dest)
