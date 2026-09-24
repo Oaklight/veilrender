@@ -2,28 +2,113 @@
 
 from __future__ import annotations
 
+import fnmatch
+import json
 import logging
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from veilrender.config import settings
 
 logger = logging.getLogger(__name__)
 
-_JSDELIVR = "https://cdn.jsdelivr.net/gh"
+_RAW_GH = "https://raw.githubusercontent.com"
 
-FONT_REGISTRY: dict[str, str] = {
-    "noto-sans-sc": f"{_JSDELIVR}/google/fonts@main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
-    "noto-sans-tc": f"{_JSDELIVR}/google/fonts@main/ofl/notosanstc/NotoSansTC%5Bwght%5D.ttf",
-    "noto-sans-jp": f"{_JSDELIVR}/google/fonts@main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf",
-    "noto-sans-kr": f"{_JSDELIVR}/google/fonts@main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf",
-    "noto-color-emoji": f"{_JSDELIVR}/googlefonts/noto-emoji@main/fonts/NotoColorEmoji.ttf",
-    "noto-sans-arabic": f"{_JSDELIVR}/google/fonts@main/ofl/notosansarabic/NotoSansArabic%5Bwght%5D.ttf",
-    "noto-sans-thai": f"{_JSDELIVR}/google/fonts@main/ofl/notosansthai/NotoSansThai%5Bwght%5D.ttf",
-    "noto-sans-devanagari": f"{_JSDELIVR}/google/fonts@main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwght%5D.ttf",
-    "lxgw-wenkai": f"{_JSDELIVR}/lxgw/LxgwWenKai@main/fonts/TTF/LXGWWenKai-Regular.ttf",
+
+@dataclass(frozen=True)
+class _GitHubFontSpec:
+    owner: str
+    repo: str
+    path: str
+    glob: str
+    fallback_url: str
+
+
+def _gf(path: str, glob: str, fallback_filename: str) -> _GitHubFontSpec:
+    """Shorthand for google/fonts specs."""
+    return _GitHubFontSpec(
+        "google",
+        "fonts",
+        f"ofl/{path}",
+        glob,
+        f"{_RAW_GH}/google/fonts/main/ofl/{path}/{fallback_filename}",
+    )
+
+
+FONT_REGISTRY: dict[str, _GitHubFontSpec] = {
+    "noto-sans-sc": _gf("notosanssc", "NotoSansSC*.ttf", "NotoSansSC%5Bwght%5D.ttf"),
+    "noto-sans-tc": _gf("notosanstc", "NotoSansTC*.ttf", "NotoSansTC%5Bwght%5D.ttf"),
+    "noto-sans-jp": _gf("notosansjp", "NotoSansJP*.ttf", "NotoSansJP%5Bwght%5D.ttf"),
+    "noto-sans-kr": _gf("notosanskr", "NotoSansKR*.ttf", "NotoSansKR%5Bwght%5D.ttf"),
+    "noto-color-emoji": _gf(
+        "notocoloremoji", "NotoColorEmoji*.ttf", "NotoColorEmoji-Regular.ttf"
+    ),
+    "noto-sans-arabic": _gf(
+        "notosansarabic", "NotoSansArabic*.ttf", "NotoSansArabic%5Bwdth%2Cwght%5D.ttf"
+    ),
+    "noto-sans-thai": _gf(
+        "notosansthai", "NotoSansThai*.ttf", "NotoSansThai%5Bwdth%2Cwght%5D.ttf"
+    ),
+    "noto-sans-devanagari": _gf(
+        "notosansdevanagari",
+        "NotoSansDevanagari*.ttf",
+        "NotoSansDevanagari%5Bwdth%2Cwght%5D.ttf",
+    ),
+    "lxgw-wenkai": _GitHubFontSpec(
+        "lxgw",
+        "LxgwWenKai",
+        "fonts/TTF",
+        "LXGWWenKai-Regular.ttf",
+        f"{_RAW_GH}/lxgw/LxgwWenKai/main/fonts/TTF/LXGWWenKai-Regular.ttf",
+    ),
 }
+
+_resolved_url_cache: dict[str, tuple[str, str]] = {}
+
+
+def _resolve_github_font_url(name: str, spec: _GitHubFontSpec) -> tuple[str, str]:
+    """Resolve a font's download URL via GitHub Contents API.
+
+    Returns:
+        (filename, url) tuple. Uses cached result if available.
+    """
+    if name in _resolved_url_cache:
+        return _resolved_url_cache[name]
+
+    api_url = (
+        f"https://api.github.com/repos/{spec.owner}/{spec.repo}/contents/{spec.path}"
+    )
+    try:
+        resp = urllib.request.urlopen(api_url, timeout=10)
+        entries = json.loads(resp.read())
+        for entry in entries:
+            if entry.get("type") == "file" and fnmatch.fnmatch(
+                entry["name"], spec.glob
+            ):
+                filename = entry["name"]
+                url = f"{_RAW_GH}/{spec.owner}/{spec.repo}/main/{spec.path}/{filename}"
+                result = (filename, url)
+                _resolved_url_cache[name] = result
+                return result
+        logger.warning(
+            "No file matching %s in %s/%s/%s",
+            spec.glob,
+            spec.owner,
+            spec.repo,
+            spec.path,
+        )
+    except Exception:
+        logger.debug(
+            "GitHub API lookup failed for %s, using fallback URL", name, exc_info=True
+        )
+
+    fallback_filename = spec.fallback_url.rsplit("/", 1)[-1]
+    result = (fallback_filename, spec.fallback_url)
+    _resolved_url_cache[name] = result
+    return result
+
 
 FONT_ALIASES: dict[str, list[str]] = {
     "cjk": ["noto-sans-sc", "noto-sans-tc", "noto-sans-jp", "noto-sans-kr"],
@@ -50,11 +135,11 @@ def _resolve_entries(font_specs: list[str]) -> list[tuple[str, str]]:
             for name in FONT_ALIASES[spec]:
                 if name not in seen:
                     seen.add(name)
-                    entries.append((f"{name}.ttf", FONT_REGISTRY[name]))
+                    entries.append(_resolve_github_font_url(name, FONT_REGISTRY[name]))
         elif spec in FONT_REGISTRY:
             if spec not in seen:
                 seen.add(spec)
-                entries.append((f"{spec}.ttf", FONT_REGISTRY[spec]))
+                entries.append(_resolve_github_font_url(spec, FONT_REGISTRY[spec]))
         elif spec.startswith(("http://", "https://")):
             filename = spec.rsplit("/", 1)[-1].split("?")[0] or "custom-font.ttf"
             if filename not in seen:
