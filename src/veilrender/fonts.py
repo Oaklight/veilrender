@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
+import os
 import subprocess
 import urllib.request
 from dataclasses import dataclass
@@ -14,8 +15,6 @@ from veilrender.config import settings
 
 logger = logging.getLogger(__name__)
 
-_RAW_GH = "https://raw.githubusercontent.com"
-
 
 @dataclass(frozen=True)
 class _GitHubFontSpec:
@@ -24,6 +23,9 @@ class _GitHubFontSpec:
     path: str
     glob: str
     fallback_url: str
+
+
+_RAW_GH = "https://raw.githubusercontent.com"
 
 
 def _gf(path: str, glob: str, fallback_filename: str) -> _GitHubFontSpec:
@@ -66,29 +68,47 @@ FONT_REGISTRY: dict[str, _GitHubFontSpec] = {
 }
 
 _resolved_url_cache: dict[str, tuple[str, str]] = {}
+_dir_listing_cache: dict[str, list[dict]] = {}
+
+
+def _fetch_github_dir(owner: str, repo: str, path: str) -> list[dict]:
+    """Fetch directory listing from GitHub Contents API, cached per directory."""
+    cache_key = f"{owner}/{repo}/{path}"
+    if cache_key in _dir_listing_cache:
+        return _dir_listing_cache[cache_key]
+
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(api_url, headers=headers)
+    resp = urllib.request.urlopen(req, timeout=10)
+    entries = json.loads(resp.read())
+    _dir_listing_cache[cache_key] = entries
+    return entries
 
 
 def _resolve_github_font_url(name: str, spec: _GitHubFontSpec) -> tuple[str, str]:
     """Resolve a font's download URL via GitHub Contents API.
 
     Returns:
-        (filename, url) tuple. Uses cached result if available.
+        (filename, url) tuple. API results are cached; fallback results
+        are not cached so the API is retried on subsequent calls.
     """
     if name in _resolved_url_cache:
         return _resolved_url_cache[name]
 
-    api_url = (
-        f"https://api.github.com/repos/{spec.owner}/{spec.repo}/contents/{spec.path}"
-    )
     try:
-        resp = urllib.request.urlopen(api_url, timeout=10)
-        entries = json.loads(resp.read())
+        entries = _fetch_github_dir(spec.owner, spec.repo, spec.path)
         for entry in entries:
             if entry.get("type") == "file" and fnmatch.fnmatch(
                 entry["name"], spec.glob
             ):
                 filename = entry["name"]
-                url = f"{_RAW_GH}/{spec.owner}/{spec.repo}/main/{spec.path}/{filename}"
+                url = entry.get("download_url") or (
+                    f"{_RAW_GH}/{spec.owner}/{spec.repo}/main/{spec.path}/{filename}"
+                )
                 result = (filename, url)
                 _resolved_url_cache[name] = result
                 return result
@@ -101,13 +121,13 @@ def _resolve_github_font_url(name: str, spec: _GitHubFontSpec) -> tuple[str, str
         )
     except Exception:
         logger.debug(
-            "GitHub API lookup failed for %s, using fallback URL", name, exc_info=True
+            "GitHub API lookup failed for %s, using fallback URL",
+            name,
+            exc_info=True,
         )
 
     fallback_filename = spec.fallback_url.rsplit("/", 1)[-1]
-    result = (fallback_filename, spec.fallback_url)
-    _resolved_url_cache[name] = result
-    return result
+    return (fallback_filename, spec.fallback_url)
 
 
 FONT_ALIASES: dict[str, list[str]] = {
