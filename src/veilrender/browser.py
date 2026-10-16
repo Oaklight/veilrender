@@ -789,12 +789,15 @@ class BrowserManager:
         self._health_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._queue_depth: int = 0
 
-        if settings.resource_filter:
-            self._blocklist = load_blocklist(settings.blocked_domains_extra)
-            self._route_handler = make_route_handler(self._blocklist)
-        else:
-            self._blocklist = frozenset()
-            self._route_handler = None
+        self._blocklist = (
+            load_blocklist(settings.blocked_domains_extra)
+            if settings.resource_filter
+            else frozenset()
+        )
+        # The route handler enforces both ad/tracker filtering and the SSRF
+        # destination guard, so it is always installed: an empty blocklist
+        # disables filtering only, never the security check.
+        self._route_handler = make_route_handler(self._blocklist)
 
     async def start(self) -> None:
         for w in self._workers:

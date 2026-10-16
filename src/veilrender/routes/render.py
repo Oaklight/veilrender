@@ -194,11 +194,32 @@ def register(app: App) -> None:
                     {"error": "URL triggers a file download, not a renderable page"},
                     status_code=400,
                 )
+            if "blockedbyclient" in exc_str or "ERR_BLOCKED_BY_CLIENT" in exc_str:
+                stats.render.record_failure(elapsed)
+                logger.warning("Navigation blocked by outbound policy for %s", req.url)
+                return JSONResponse(
+                    {"error": "Destination blocked by outbound request policy"},
+                    status_code=400,
+                )
             stats.render.record_failure(elapsed)
             logger.error("Render failed for %s: %s", req.url, exc)
             return JSONResponse(
                 {"error": f"Render failed: {exc_str}"},
                 status_code=502,
+            )
+
+        # Re-check where the navigation actually ended up. The submitted URL is
+        # validated up front, but a redirect can land somewhere else entirely,
+        # and the body returned below comes from wherever it landed.
+        try:
+            validate_url(final_url)
+        except URLValidationError as exc:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.render.record_failure(elapsed)
+            logger.warning("Rejected redirect destination %s: %s", final_url, exc)
+            return JSONResponse(
+                {"error": f"Redirect destination rejected: {exc!s}"},
+                status_code=400,
             )
 
         # Build content based on requested formats

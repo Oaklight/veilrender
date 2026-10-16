@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-16
+
+### Security
+
+- **SSRF via redirect** — the destination of every request the browser makes is now re-checked, and the URL a navigation actually landed on is validated before its content is returned. Previously only the submitted URL was validated, so a public URL that redirected to an internal address had the internal response body returned to the caller. Affected `/render` and `/screenshot`. Reported privately by a security researcher; see the published advisory for detail and credit.
+- **Non-global addresses rejected** — the address check now uses `is_global` instead of an enumerated private-range denylist, so CGNAT (`100.64.0.0/10`) and other special-purpose ranges are refused rather than fetched.
+- **Destination check no longer tied to resource filtering** — the check is installed even when `VEILRENDER_RESOURCE_FILTER=false`. Previously that setting skipped the request filter entirely, which would have removed the destination check along with it.
+
+### Added
+
+- `SECURITY.md` documenting private vulnerability reporting and scope.
+
 ## [0.6.2] - 2026-09-24
 
 ### Added

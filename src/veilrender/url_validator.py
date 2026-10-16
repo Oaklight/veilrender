@@ -2,8 +2,9 @@
 
 Blocks:
 - Non-HTTP(S) schemes: file://, data:, javascript:, ftp://, etc.
-- Private/reserved IP ranges: 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12,
-  192.168.0.0/16, 169.254.0.0/16, ::1, fd00::/8, etc.
+- Every address outside the globally routable space, via an ``is_global``
+  allowlist: loopback, RFC1918, link-local (incl. the 169.254.169.254 cloud
+  metadata address), CGNAT 100.64.0.0/10, unique-local, multicast, reserved.
 - DNS resolution is checked before navigation to prevent DNS rebinding.
 """
 
@@ -145,20 +146,59 @@ def _check_resolved_ips(hostname: str) -> None:
 
 
 def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    """Check if an IP address is in a blocked range.
+    """Check whether an IP address is outside the globally routable space.
 
-    Blocks:
+    This is an allowlist (``is_global``) rather than an enumerated denylist,
+    so ranges that are neither loopback nor ``is_private`` are rejected too:
+
         - Loopback (127.0.0.0/8, ::1)
         - Private networks (10/8, 172.16/12, 192.168/16)
-        - Link-local (169.254/16, fe80::/10)
-        - Unique local (fd00::/8)
-        - Multicast, reserved, unspecified
+        - Link-local, including cloud metadata (169.254/16, fe80::/10)
+        - CGNAT / shared address space (100.64.0.0/10)
+        - Unique local (fc00::/7), multicast, reserved, unspecified,
+          benchmarking (198.18.0.0/15) and other special-purpose ranges
     """
-    return (
-        addr.is_loopback
-        or addr.is_private
-        or addr.is_reserved
-        or addr.is_multicast
-        or addr.is_link_local
-        or addr.is_unspecified
-    )
+    return not addr.is_global
+
+
+def is_global_host(hostname: str) -> bool:
+    """Check whether a hostname resolves only to globally routable addresses.
+
+    Callers use this to re-check each request the browser issues, including
+    requests produced by a redirect, so that a public URL cannot bounce a
+    navigation into loopback, an RFC1918 address, or the cloud metadata
+    endpoint.
+
+    Args:
+        hostname: Hostname or IP literal taken from a request URL.
+
+    Returns:
+        True only if the host is an IP literal or resolves exclusively to
+        public addresses. Returns False when resolution fails, so unresolvable
+        hosts are refused rather than attempted.
+    """
+    host = (hostname or "").strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host:
+        return False
+
+    try:
+        return not _is_blocked_ip(ipaddress.ip_address(host))
+    except ValueError:
+        pass  # Not an IP literal, resolve it below
+
+    try:
+        results = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError):
+        return False
+
+    for _family, _type, _proto, _canonname, sockaddr in results:
+        try:
+            addr = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(addr):
+            return False
+
+    return bool(results)
