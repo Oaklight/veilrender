@@ -9,11 +9,14 @@ https://github.com/StevenBlack/hosts
 
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 import logging
 from urllib.parse import urlparse
 
 from patchright.async_api import Route
+
+from veilrender.url_validator import is_global_host
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +84,19 @@ def should_block(url: str, blocklist: frozenset[str]) -> bool:
 
 
 def make_route_handler(blocklist: frozenset[str]):
-    """Create a Playwright route handler that blocks requests to listed domains.
+    """Create a Playwright route handler enforcing the outbound request policy.
+
+    Two checks run on every request the browser issues, including requests
+    produced by a redirect or by a subresource fetch:
+
+    1. The blocklist (ad/tracker domains) is matched by domain suffix.
+    2. The destination host must resolve only to globally routable addresses,
+       so a redirect cannot bounce the navigation into loopback, RFC1918, the
+       cloud metadata endpoint, or any other non-public range.
+
+    Checking the destination rather than the URL the caller submitted is what
+    closes the redirect-based SSRF: the submitted URL passes validation, but
+    the hop it redirects to does not.
 
     Args:
         blocklist: Set of blocked domain names.
@@ -90,12 +105,56 @@ def make_route_handler(blocklist: frozenset[str]):
         An async route handler function for use with ``page.route()``.
     """
 
+    # Hostnames already found to be non-public stay blocked for the life of the
+    # handler. Only refusals are cached: caching an allow would let a host that
+    # later resolves to a private address slip through.
+    blocked_hosts: set[str] = set()
+
     async def _handle_route(route: Route) -> None:
         url = route.request.url
+
         if should_block(url, blocklist):
-            logger.info("Blocked: %s", url[:200])
+            logger.info("Blocked (blocklist): %s", url[:200])
             await route.abort("blockedbyclient")
-        else:
-            await route.continue_()
+            return
+
+        if not await _allows_public_destination(url, blocked_hosts):
+            logger.warning("Blocked (non-public destination): %s", url[:200])
+            await route.abort("blockedbyclient")
+            return
+
+        await route.continue_()
 
     return _handle_route
+
+
+async def _allows_public_destination(url: str, blocked_hosts: set[str]) -> bool:
+    """Check that a request URL points at a globally routable host.
+
+    Non-network schemes (``data:``, ``blob:``, ``about:``) carry inline
+    content rather than triggering a fetch, so they are allowed through. DNS
+    resolution blocks, so it runs in a worker thread to avoid stalling the
+    event loop.
+
+    Args:
+        url: The request URL the browser is about to issue.
+        blocked_hosts: Cache of hostnames already known to be non-public.
+            Refusals are recorded here.
+
+    Returns:
+        True if the request may proceed.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return True
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+    if hostname in blocked_hosts:
+        return False
+
+    allowed = await asyncio.to_thread(is_global_host, hostname)
+    if not allowed:
+        blocked_hosts.add(hostname)
+    return allowed

@@ -102,6 +102,10 @@ def register(app: App) -> None:
                     wait_until=effective_wu,
                     timeout=goto_timeout,
                 )
+                # A redirect can land somewhere other than the submitted URL,
+                # so re-check where navigation actually ended up before
+                # capturing anything from it.
+                validate_url(page.url)
                 # Font CSS is cached locally as inline content — single
                 # add_style_tag(content=...) call, no external network.
                 # Skip on full_page where content > typography.
@@ -209,8 +213,26 @@ def register(app: App) -> None:
                 status_code=504,
                 content_type="application/json",
             )
+        except URLValidationError as exc:
+            elapsed = (time.monotonic() - t0) * 1000
+            stats.screenshot.record_failure(elapsed)
+            logger.warning("Rejected redirect destination for %s: %s", req.url, exc)
+            return Response(
+                body=f'{{"error": "Redirect destination rejected: {exc!s}"}}'.encode(),
+                status_code=400,
+                content_type="application/json",
+            )
         except Exception as exc:
             elapsed = (time.monotonic() - t0) * 1000
+            exc_str = str(exc)
+            if "blockedbyclient" in exc_str or "ERR_BLOCKED_BY_CLIENT" in exc_str:
+                stats.screenshot.record_failure(elapsed)
+                logger.warning("Navigation blocked by outbound policy for %s", req.url)
+                return Response(
+                    body=b'{"error": "Destination blocked by outbound request policy"}',
+                    status_code=400,
+                    content_type="application/json",
+                )
             stats.screenshot.record_failure(elapsed)
             logger.error("Screenshot failed for %s: %s", req.url, exc)
             return Response(
