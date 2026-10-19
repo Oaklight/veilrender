@@ -1,5 +1,5 @@
 # /// zerodep
-# version = "0.4.0"
+# version = "0.6.0"
 # deps = []
 # tier = "subsystem"
 # category = "network"
@@ -45,6 +45,7 @@ import mimetypes
 import os
 import re
 import signal
+import ssl
 import sys
 from collections.abc import AsyncIterator, Callable
 from email.utils import formatdate
@@ -77,6 +78,8 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 DEFAULT_MAX_BODY_SIZE = 1_048_576  # 1 MB
 DEFAULT_READ_TIMEOUT = 30.0  # seconds
+DEFAULT_KEEP_ALIVE_TIMEOUT = 5.0  # seconds between requests on one connection
+DEFAULT_MAX_REQUESTS_PER_CONNECTION = 100
 
 _STATUS_REASONS: dict[int, str] = {
     100: "Continue",
@@ -122,6 +125,11 @@ _PARAM_RE = re.compile(r"<(?:(\w+):)?(\w+)>")
 
 _SENTINEL = object()
 
+# Seconds between disconnect checks while waiting for the next chunk from
+# a streaming generator.  Only matters when the generator is blocked on
+# slow upstream I/O; fast generators never hit the timeout.
+_STREAMING_DISCONNECT_CHECK_INTERVAL: float = 30.0
+
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
 
@@ -146,6 +154,19 @@ class HTTPException(Exception):
 
 class _BadRequest(Exception):
     """Internal: malformed HTTP request from client."""
+
+
+class _IdleTimeout(asyncio.TimeoutError):
+    """No request line arrived within the keep-alive idle window.
+
+    Subclasses :class:`asyncio.TimeoutError` so callers that only care about
+    "the read timed out" keep working, while :meth:`App._handle_connection`
+    can close a reused connection quietly instead of answering ``408``.
+    """
+
+
+class _ClientDisconnected(Exception):
+    """Internal: the client closed the connection between requests."""
 
 
 def abort(status_code: int, message: str | None = None) -> None:
@@ -509,6 +530,8 @@ class StreamingResponse:
         background: Optional callable invoked after the stream completes
             (including client disconnect).  Accepts both sync and async
             callables.  Exceptions are logged and suppressed.
+        disconnect_check_interval: Seconds between client-disconnect
+            checks while the generator is blocked.  Defaults to 30.
     """
 
     __slots__ = (
@@ -518,6 +541,7 @@ class StreamingResponse:
         "content_type",
         "background",
         "_cookie_headers",
+        "_disconnect_check_interval",
     )
 
     def __init__(
@@ -527,6 +551,7 @@ class StreamingResponse:
         headers: dict[str, str] | None = None,
         content_type: str = "application/octet-stream",
         background: Callable[[], Any] | None = None,
+        disconnect_check_interval: float | None = None,
     ):
         self._generator = generator
         self.status_code = status_code
@@ -534,6 +559,11 @@ class StreamingResponse:
         self.content_type = content_type
         self.background = background
         self._cookie_headers: list[str] = []
+        self._disconnect_check_interval = (
+            disconnect_check_interval
+            if disconnect_check_interval is not None
+            else _STREAMING_DISCONNECT_CHECK_INTERVAL
+        )
 
     def set_cookie(
         self,
@@ -578,7 +608,14 @@ class StreamingResponse:
         )
 
     async def _write(self, writer: asyncio.StreamWriter) -> None:
-        """Write status line, headers, then stream the body."""
+        """Write status line, headers, then stream the body.
+
+        Raises ``BrokenPipeError``, ``ConnectionResetError``, or
+        ``ConnectionAbortedError`` on client disconnect.  The caller
+        (``_handle_connection``) is responsible for handling these.
+        Generator cleanup and the background callback still run via
+        the ``finally`` block before the exception propagates.
+        """
         reason = _STATUS_REASONS.get(self.status_code, "Unknown")
         is_sse = self.content_type.startswith("text/event-stream")
 
@@ -600,7 +637,49 @@ class StreamingResponse:
         await writer.drain()
 
         try:
-            async for chunk in self._generator:
+            aiter = self._generator.__aiter__()
+            is_closing = getattr(writer, "is_closing", None)
+            while True:
+                # Detect client disconnect between generator yields.
+                # When the generator blocks on slow upstream I/O (e.g.
+                # an LLM API producing the next SSE chunk), plain
+                # ``async for`` never checks the writer state.  We
+                # race the next-chunk coroutine against a periodic
+                # disconnect check so CLOSE_WAIT connections don't
+                # accumulate.
+                if is_closing is not None and is_closing():
+                    raise BrokenPipeError("client disconnected (detected)")
+
+                next_coro = aiter.__anext__()
+                if is_closing is None:
+                    # Writer has no is_closing (e.g. mock) — fall back
+                    # to plain await without disconnect detection.
+                    try:
+                        chunk = await next_coro
+                    except StopAsyncIteration:
+                        break
+                else:
+                    next_task = asyncio.ensure_future(next_coro)
+                    try:
+                        chunk = await _anext_or_disconnect(
+                            next_task,
+                            is_closing,
+                            self._disconnect_check_interval,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except (
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        ConnectionAbortedError,
+                    ):
+                        next_task.cancel()
+                        try:
+                            await next_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                        raise
+
                 if isinstance(chunk, str):
                     chunk = chunk.encode("utf-8")
                 writer.write(f"{len(chunk):x}\r\n".encode("latin-1"))
@@ -610,7 +689,7 @@ class StreamingResponse:
             writer.write(b"0\r\n\r\n")
             await writer.drain()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-            logger.debug("Client disconnected during streaming")
+            raise
         finally:
             aclose = getattr(self._generator, "aclose", None)
             if aclose is not None:
@@ -711,29 +790,78 @@ def _compile_route(
 # ── HTTP Parsing ─────────────────────────────────────────────────────────────
 
 
+def _read_error_response(exc: Exception) -> Response:
+    """Map an exception raised while reading a request to a response.
+
+    Args:
+        exc: The exception.
+
+    Returns:
+        The response to send before closing the connection.
+    """
+    if isinstance(exc, _BadRequest):
+        return Response(
+            body=str(exc),
+            status_code=400,
+            content_type="text/plain; charset=utf-8",
+        )
+    if isinstance(exc, HTTPException):
+        return JSONResponse({"error": exc.message}, status_code=exc.status_code)
+    if isinstance(exc, asyncio.TimeoutError):
+        return JSONResponse({"error": "Request Timeout"}, status_code=408)
+    if isinstance(exc, asyncio.IncompleteReadError):
+        return JSONResponse({"error": "Bad Request: incomplete body"}, status_code=400)
+    return JSONResponse({"error": "Internal Server Error"}, status_code=500)
+
+
 async def _read_request(
     reader: asyncio.StreamReader,
     timeout: float,
     max_body_size: int,
-) -> tuple[str, str, str, dict[str, str], bytes]:
+    *,
+    idle_timeout: float | None = None,
+) -> tuple[str, str, str, dict[str, str], bytes, str]:
     """Read and parse an HTTP request from a stream.
 
+    Args:
+        reader: Client stream.
+        timeout: Budget for each header and body read once the request line
+            has arrived.
+        max_body_size: Largest body accepted, in bytes.
+        idle_timeout: Budget for the request line itself, used for the wait
+            between requests on a kept-alive connection. Defaults to
+            *timeout*.
+
     Returns:
-        Tuple of (method, path, query_string, headers, body).
+        Tuple of (method, path, query_string, headers, body, version).
 
     Raises:
+        _ClientDisconnected: If the stream ended before a request line, which
+            is how a client closes a kept-alive connection.
+        _IdleTimeout: If no request line arrived within *idle_timeout*.
         _BadRequest: If the request is malformed.
-        asyncio.TimeoutError: If reading times out.
+        asyncio.TimeoutError: If reading headers or the body times out.
     """
     # -- Request line --
-    raw_line = await asyncio.wait_for(reader.readline(), timeout=timeout)
+    # The wait for the first byte is the only one bounded by the idle window:
+    # once a request has started, its headers and body get the full read
+    # budget, so a client that uploads slowly after its headers is not cut off.
+    request_line_timeout = timeout if idle_timeout is None else idle_timeout
+    try:
+        raw_line = await asyncio.wait_for(
+            reader.readline(), timeout=request_line_timeout
+        )
+    except asyncio.TimeoutError:
+        if idle_timeout is not None:
+            raise _IdleTimeout from None
+        raise
     if not raw_line:
-        raise _BadRequest("Empty request")
+        raise _ClientDisconnected
     request_line = raw_line.decode("latin-1").rstrip("\r\n")
     parts = request_line.split(" ", 2)
     if len(parts) != 3:
         raise _BadRequest(f"Malformed request line: {request_line!r}")
-    method, raw_url, _version = parts
+    method, raw_url, version = parts
 
     # -- URL --
     parsed = urlparse(raw_url)
@@ -763,7 +891,7 @@ async def _read_request(
     elif headers.get("transfer-encoding", "").lower() == "chunked":
         body = await _read_chunked_body(reader, timeout, max_body_size)
 
-    return method.upper(), path, query_string, headers, body
+    return method.upper(), path, query_string, headers, body, version.upper()
 
 
 async def _read_chunked_body(
@@ -793,6 +921,36 @@ async def _read_chunked_body(
 
 
 # ── Utilities ────────────────────────────────────────────────────────────────
+
+
+async def _anext_or_disconnect(
+    next_task: asyncio.Task[Any],
+    is_closing: Callable[[], bool],
+    interval: float,
+) -> Any:
+    """Await *next_task* while periodically checking for client disconnect.
+
+    Polls ``is_closing()`` every *interval* seconds.  If the writer is
+    closing, cancels the pending ``__anext__`` task and raises
+    ``BrokenPipeError`` so the caller can clean up the generator.
+
+    If the task completes normally the chunk value is returned.  If it
+    raises ``StopAsyncIteration`` (generator exhausted) that exception
+    propagates to the caller unchanged.
+    """
+    while True:
+        try:
+            return await asyncio.wait_for(asyncio.shield(next_task), timeout=interval)
+        except asyncio.TimeoutError:
+            if is_closing():
+                next_task.cancel()
+                try:
+                    await next_task
+                except (asyncio.CancelledError, StopAsyncIteration, Exception):
+                    pass
+                raise BrokenPipeError("client disconnected (detected)")
+            # Generator is still working on the next chunk; keep waiting.
+            continue
 
 
 def _http_date(timestamp: float | None = None) -> str:
@@ -875,9 +1033,27 @@ def _resolve_static_file(
 class App:
     """Async HTTP server application.
 
+    Request lifecycle::
+
+        before_request → route handler → after_request
+          → on_response_started → write → on_response_completed
+                                    ↘ on_client_disconnect
+
     Args:
         max_body_size: Maximum request body size in bytes.
         read_timeout: Timeout for reading a single request (seconds).
+        keep_alive: Serve more than one request per connection.  HTTP/1.1
+            connections stay open unless the client or the response asks to
+            close; HTTP/1.0 stays open only when the client asks.  Streaming
+            responses always close.  Defaults to ``True``.
+        keep_alive_timeout: Seconds an idle kept-alive connection may wait for
+            the next request before the server closes it quietly.  ``0`` or a
+            negative value disables reuse, so the response never advertises a
+            connection the server will not keep.  Defaults to
+            :data:`DEFAULT_KEEP_ALIVE_TIMEOUT`.
+        max_requests_per_connection: Close a connection after this many
+            requests even if the client would reuse it.  Defaults to
+            :data:`DEFAULT_MAX_REQUESTS_PER_CONNECTION`.
 
     Example::
 
@@ -895,6 +1071,9 @@ class App:
         *,
         max_body_size: int = DEFAULT_MAX_BODY_SIZE,
         read_timeout: float = DEFAULT_READ_TIMEOUT,
+        keep_alive: bool = True,
+        keep_alive_timeout: float = DEFAULT_KEEP_ALIVE_TIMEOUT,
+        max_requests_per_connection: int = DEFAULT_MAX_REQUESTS_PER_CONNECTION,
     ):
         self._routes: list[_Route] = []
         self._static_routes: list[tuple[str, str]] = []
@@ -902,12 +1081,18 @@ class App:
         self._after_request_handlers: list[Callable[..., Any]] = []
         self._startup_handlers: list[Callable[[], Any]] = []
         self._shutdown_handlers: list[Callable[[], Any]] = []
+        self._on_response_started_handlers: list[Callable[..., Any]] = []
+        self._on_response_completed_handlers: list[Callable[..., Any]] = []
+        self._on_client_disconnect_handlers: list[Callable[..., Any]] = []
         self._error_handlers: dict[int | type, Callable[..., Any]] = {}
         self._server: asyncio.Server | None = None
         self._shutdown_event: asyncio.Event | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self.max_body_size = max_body_size
         self.read_timeout = read_timeout
+        self.keep_alive = keep_alive
+        self.keep_alive_timeout = keep_alive_timeout
+        self.max_requests_per_connection = max_requests_per_connection
         self.port: int | None = None
         self.host: str | None = None
 
@@ -1060,6 +1245,82 @@ class App:
         self._shutdown_handlers.append(handler)
         return handler
 
+    # ── Request Lifecycle Signals ────────────────────────────────────────
+
+    def on_response_started(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """Register a response-started signal.
+
+        Fired just before the response is written to the client.  Useful
+        for TTFB (time-to-first-byte) metrics.
+
+        The handler receives ``(request, response)`` and its return value
+        is ignored.  Both sync and async callables are supported.
+        Exceptions are logged and suppressed.  Handlers run sequentially;
+        keep them fast to avoid delaying the response write.
+
+        Example::
+
+            @app.on_response_started
+            async def ttfb(request, response):
+                request.state.response_start = time.monotonic()
+        """
+        self._on_response_started_handlers.append(handler)
+        return handler
+
+    def on_response_completed(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """Register a response-completed signal.
+
+        Fired after the entire response body has been successfully sent
+        to the client.  Useful for total transfer time and post-response
+        logging.
+
+        The handler receives ``(request, response)`` and its return value
+        is ignored.  Both sync and async callables are supported.
+        Exceptions are logged and suppressed.  Handlers run sequentially.
+
+        Not fired when the client disconnects mid-response (see
+        :meth:`on_client_disconnect` for that case).
+
+        Example::
+
+            @app.on_response_completed
+            async def log_transfer(request, response):
+                elapsed = time.monotonic() - request.state.response_start
+                logger.info("Sent %d in %.3fs", response.status_code, elapsed)
+        """
+        self._on_response_completed_handlers.append(handler)
+        return handler
+
+    def on_client_disconnect(self, handler: Callable[..., Any]) -> Callable[..., Any]:
+        """Register a client-disconnect signal.
+
+        Fired when the client closes the connection during response
+        delivery (broken pipe, connection reset).  Does not fire for
+        disconnects during request dispatch (e.g. slow handler).
+        Useful for cleanup, metrics, and cancelling expensive work.
+
+        The handler receives ``(request)`` and its return value is ignored.
+        Both sync and async callables are supported.  Exceptions are logged
+        and suppressed.
+
+        Example::
+
+            @app.on_client_disconnect
+            async def on_disconnect(request):
+                logger.info("Client %s disconnected", request.client_addr)
+        """
+        self._on_client_disconnect_handlers.append(handler)
+        return handler
+
+    async def _fire_signal(
+        self, name: str, handlers: list[Callable[..., Any]], *args: Any
+    ) -> None:
+        for hook in handlers:
+            try:
+                await _invoke(hook, *args)
+            except Exception:
+                logger.warning("%s hook failed", name, exc_info=True)
+
     # ── Request Dispatch ─────────────────────────────────────────────────
 
     def _match_route(
@@ -1071,13 +1332,15 @@ class App:
             (matched_route, regex_match, path_existed).  *path_existed* is
             True when a route matched the path but not the HTTP method.
         """
+        # RFC 9110 §9.3.2: a server that supports GET must support HEAD.
+        method = "GET" if request.method == "HEAD" else request.method
         path_existed = False
         for route in self._routes:
             m = route.pattern.match(request.path)
             if m is None:
                 continue
             path_existed = True
-            if "*" not in route.methods and request.method not in route.methods:
+            if "*" not in route.methods and method not in route.methods:
                 continue
             return route, m, True
         return None, None, path_existed
@@ -1202,55 +1465,149 @@ class App:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        """Handle a single client connection."""
+        """Serve requests on one connection until it closes.
+
+        A kept-alive connection is read, dispatched and written in a loop;
+        the loop ends on ``Connection: close``, an HTTP/1.0 request that did
+        not ask to stay, a streaming response, the request limit, an idle
+        timeout, or a client disconnect.
+        """
         peer = writer.get_extra_info("peername")
         client_addr = (peer[0], peer[1]) if peer else ("unknown", 0)
+        served = 0
 
         try:
-            method, path, qs, headers, body = await _read_request(
-                reader, self.read_timeout, self.max_body_size
-            )
-        except _BadRequest as exc:
-            logger.debug("Bad request from %s: %s", client_addr, exc)
-            await self._send_error_and_close(
-                writer,
-                Response(
-                    body=str(exc),
-                    status_code=400,
-                    content_type="text/plain; charset=utf-8",
-                ),
-            )
-            return
-        except HTTPException as exc:
-            await self._send_error_and_close(
-                writer,
-                JSONResponse({"error": exc.message}, status_code=exc.status_code),
-            )
-            return
-        except asyncio.TimeoutError:
-            logger.debug("Request read timed out from %s", client_addr)
-            await self._send_error_and_close(
-                writer,
-                JSONResponse({"error": "Request Timeout"}, status_code=408),
-            )
-            return
-        except asyncio.IncompleteReadError:
-            logger.debug("Incomplete request body from %s", client_addr)
-            await self._send_error_and_close(
-                writer,
-                JSONResponse(
-                    {"error": "Bad Request: incomplete body"}, status_code=400
-                ),
-            )
-            return
-        except Exception:
-            logger.debug("Failed to read request from %s", client_addr, exc_info=True)
-            await self._send_error_and_close(
-                writer,
-                JSONResponse({"error": "Internal Server Error"}, status_code=500),
-            )
-            return
+            while True:
+                idle_timeout = (
+                    self.keep_alive_timeout
+                    if served and self.keep_alive and self.keep_alive_timeout > 0
+                    else None
+                )
+                try:
+                    request_parts = await _read_request(
+                        reader,
+                        self.read_timeout,
+                        self.max_body_size,
+                        idle_timeout=idle_timeout,
+                    )
+                except _ClientDisconnected:
+                    break
+                except Exception as exc:
+                    await self._reject_read(exc, writer, client_addr)
+                    break
 
+                method, path, qs, headers, body, version = request_parts
+                keep_alive = self._keep_alive_requested(version, headers, served + 1)
+                served += 1
+                try:
+                    if not await self._serve_one(
+                        method,
+                        path,
+                        qs,
+                        headers,
+                        body,
+                        client_addr,
+                        writer,
+                        keep_alive,
+                    ):
+                        break
+                except Exception:
+                    logger.exception("Error writing response to %s", client_addr)
+                    break
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    async def _reject_read(
+        self,
+        exc: Exception,
+        writer: asyncio.StreamWriter,
+        client_addr: tuple,
+    ) -> None:
+        """Answer a failed request read, or close quietly on an idle timeout.
+
+        A timeout before the request line is an idle kept-alive connection:
+        the client simply stopped talking, so the connection closes without a
+        response. A timeout after the request line means the client started a
+        request and did not finish it, which gets a ``408``.
+
+        Args:
+            exc: The exception raised while reading the request.
+            writer: The client connection.
+            client_addr: Client address for logging.
+        """
+        if isinstance(exc, _IdleTimeout):
+            logger.debug("Keep-alive idle timeout from %s", client_addr)
+            return
+        if isinstance(exc, asyncio.TimeoutError):
+            logger.debug("Request read timed out from %s", client_addr)
+        elif isinstance(exc, _BadRequest):
+            logger.debug("Bad request from %s: %s", client_addr, exc)
+        elif not isinstance(exc, (HTTPException, asyncio.IncompleteReadError)):
+            logger.debug("Failed to read request from %s", client_addr, exc_info=True)
+        elif isinstance(exc, asyncio.IncompleteReadError):
+            logger.debug("Incomplete request body from %s", client_addr)
+        await self._send_error_and_close(writer, _read_error_response(exc))
+
+    @staticmethod
+    def _connection_tokens(headers: dict[str, str]) -> set[str]:
+        """Connection header tokens, looked up case-insensitively.
+
+        Args:
+            headers: Response or request headers.
+
+        Returns:
+            Lower-cased token set; empty when there is no ``Connection``
+            header under any spelling.
+        """
+        tokens: set[str] = set()
+        for key, value in headers.items():
+            if key.lower() == "connection":
+                tokens.update(
+                    token.strip().lower() for token in value.split(",") if token.strip()
+                )
+        return tokens
+
+    @staticmethod
+    def _set_connection_header(headers: dict[str, str], value: str) -> None:
+        """Set ``Connection`` under its canonical spelling, dropping variants.
+
+        A caller that wrote ``headers={"connection": "close"}`` should get
+        one header that says ``close``, not two that disagree.
+        """
+        for key in [key for key in headers if key.lower() == "connection"]:
+            del headers[key]
+        headers["Connection"] = value
+
+    async def _serve_one(
+        self,
+        method: str,
+        path: str,
+        qs: str,
+        headers: dict[str, str],
+        body: bytes,
+        client_addr: tuple,
+        writer: asyncio.StreamWriter,
+        keep_alive: bool,
+    ) -> bool:
+        """Dispatch and write one request.
+
+        Args:
+            method: Request method.
+            path: Decoded request path.
+            qs: Query string.
+            headers: Lower-cased request headers.
+            body: Request body.
+            client_addr: Client address for logging.
+            writer: The client connection.
+            keep_alive: Whether the connection may be reused afterwards.
+
+        Returns:
+            ``True`` when the connection stays open for another request.
+        """
         request = Request(
             method=method,
             path=path,
@@ -1260,22 +1617,98 @@ class App:
             client_addr=client_addr,
             app=self,
         )
-
         logger.debug("%s %s from %s", method, path, client_addr)
 
         try:
             response = await self._dispatch(request)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            logger.debug("Connection reset by %s during dispatch", client_addr)
+            return False
+
+        # A HEAD response has no body (RFC 9110 §9.3.2), and 204/304 carry
+        # none either.  Writing one would leave stray bytes in the stream and
+        # poison the next request on a kept-alive connection (#210 review).
+        if isinstance(response, Response) and (
+            method == "HEAD" or response.status_code in (204, 304)
+        ):
+            if method == "HEAD":
+                # Same header fields as the GET would have sent, including
+                # Content-Length, but no body (RFC 9110 §9.3.2).
+                response.headers.setdefault("Content-Length", str(len(response.body)))
+            response.body = b""
+
+        keep_alive = keep_alive and not isinstance(response, StreamingResponse)
+        if keep_alive and "close" not in self._connection_tokens(response.headers):
+            self._set_connection_header(response.headers, "keep-alive")
+        else:
+            keep_alive = False
+            self._set_connection_header(response.headers, "close")
+
+        await self._fire_signal(
+            "on_response_started",
+            self._on_response_started_handlers,
+            request,
+            response,
+        )
+
+        try:
             await response._write(writer)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            await self._fire_signal(
+                "on_client_disconnect",
+                self._on_client_disconnect_handlers,
+                request,
+            )
             logger.debug("Connection reset by %s during response", client_addr)
-        except Exception:
-            logger.exception("Error writing response to %s", client_addr)
-        finally:
-            try:
-                writer.close()
-                await writer.wait_closed()
-            except Exception:
-                pass
+            return False
+
+        await self._fire_signal(
+            "on_response_completed",
+            self._on_response_completed_handlers,
+            request,
+            response,
+        )
+        is_closing = getattr(writer, "is_closing", None)
+        if is_closing is not None and is_closing():
+            return False
+        return keep_alive
+
+    def _keep_alive_requested(
+        self,
+        version: str,
+        headers: dict[str, str],
+        served: int,
+    ) -> bool:
+        """Whether this request may be followed by another on the connection.
+
+        Args:
+            version: HTTP version from the request line.
+            headers: Lower-cased request headers.
+            served: Number of requests served including this one.
+
+        Returns:
+            ``True`` when the connection should stay open.
+        """
+        if (
+            not self.keep_alive
+            or self.keep_alive_timeout <= 0
+            or served >= self.max_requests_per_connection
+        ):
+            return False
+        tokens = {
+            token.strip().lower()
+            for token in headers.get("connection", "").split(",")
+            if token.strip()
+        }
+        if "close" in tokens:
+            return False
+        if version == "HTTP/1.0":
+            return "keep-alive" in tokens
+        if not version.startswith("HTTP/1."):
+            # Unknown or malformed protocol version: do not assume the
+            # client can frame a second response.
+            return False
+        return True
 
     # ── Server Lifecycle ─────────────────────────────────────────────────
 
@@ -1322,6 +1755,10 @@ class App:
         port: int = DEFAULT_PORT,
         *,
         socket: str | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        backlog: int | None = None,
+        reuse_address: bool | None = None,
+        reuse_port: bool | None = None,
     ) -> None:
         """Start the server (blocking).
 
@@ -1333,13 +1770,44 @@ class App:
                 on a Unix socket instead of TCP. The socket file permissions
                 are restricted to owner-only (``0o600``) after creation.
                 Only available on Unix-like systems.
+            ssl_context: An :class:`ssl.SSLContext` for TLS termination.
+                When provided, the server accepts HTTPS connections.
+                The caller is responsible for configuring the context
+                (loading certs, setting verify mode, etc.).
+            backlog: Maximum number of queued connections passed to
+                :func:`asyncio.start_server`. ``None`` leaves the OS
+                default (typically 128).
+            reuse_address: Sets ``SO_REUSEADDR``. ``None`` lets asyncio
+                decide (``True`` on non-Windows).
+            reuse_port: Sets ``SO_REUSEPORT`` for multi-process load
+                balancing. ``None`` lets asyncio decide (``False``).
         """
         try:
-            asyncio.run(self._serve(host, port, socket=socket))
+            asyncio.run(
+                self._serve(
+                    host,
+                    port,
+                    socket=socket,
+                    ssl_context=ssl_context,
+                    backlog=backlog,
+                    reuse_address=reuse_address,
+                    reuse_port=reuse_port,
+                )
+            )
         except KeyboardInterrupt:
             pass
 
-    async def _serve(self, host: str, port: int, *, socket: str | None = None) -> None:
+    async def _serve(
+        self,
+        host: str,
+        port: int,
+        *,
+        socket: str | None = None,
+        ssl_context: ssl.SSLContext | None = None,
+        backlog: int | None = None,
+        reuse_address: bool | None = None,
+        reuse_port: bool | None = None,
+    ) -> None:
         """Internal async server loop."""
         self._shutdown_event = asyncio.Event()
         self._loop = asyncio.get_running_loop()
@@ -1350,19 +1818,31 @@ class App:
             await self._run_startup_hooks()
 
             if socket:
-                server = await self._start_unix_socket(socket)
+                server = await self._start_unix_socket(
+                    socket, ssl_context=ssl_context, backlog=backlog
+                )
             else:
+                kwargs: dict[str, Any] = {}
+                if backlog is not None:
+                    kwargs["backlog"] = backlog
+                if reuse_address is not None:
+                    kwargs["reuse_address"] = reuse_address
+                if reuse_port is not None:
+                    kwargs["reuse_port"] = reuse_port
                 server = await asyncio.start_server(
                     self._handle_connection,
                     host,
                     port,
+                    ssl=ssl_context,
+                    **kwargs,
                 )
                 addrs = (
                     server.sockets[0].getsockname() if server.sockets else (host, port)
                 )
                 self.host = addrs[0]
                 self.port = addrs[1]
-                logger.info("Serving on %s:%d", self.host, self.port)
+                scheme = "https" if ssl_context else "http"
+                logger.info("Serving on %s://%s:%d", scheme, self.host, self.port)
 
             self._server = server
 
@@ -1380,7 +1860,13 @@ class App:
             # Run shutdown hooks after server stops accepting connections
             await self._run_shutdown_hooks()
 
-    async def _start_unix_socket(self, socket_path: str) -> asyncio.Server:
+    async def _start_unix_socket(
+        self,
+        socket_path: str,
+        *,
+        ssl_context: ssl.SSLContext | None = None,
+        backlog: int | None = None,
+    ) -> asyncio.Server:
         """Start listening on a Unix domain socket.
 
         Handles stale socket cleanup, permission hardening (``0o600``),
@@ -1388,6 +1874,10 @@ class App:
 
         Args:
             socket_path: Path for the Unix domain socket file.
+            ssl_context: Optional :class:`ssl.SSLContext` for TLS over
+                the Unix socket.
+            backlog: Maximum number of queued connections. ``None``
+                leaves the OS default.
 
         Returns:
             The ``asyncio.Server`` instance.
@@ -1420,9 +1910,14 @@ class App:
             logger.error("Socket parent directory does not exist: %s", parent)
             sys.exit(1)
 
+        kwargs: dict[str, Any] = {}
+        if backlog is not None:
+            kwargs["backlog"] = backlog
         server = await asyncio.start_unix_server(
             self._handle_connection,
             path=path,
+            ssl=ssl_context,
+            **kwargs,
         )
 
         # Restrict permissions to owner-only
@@ -1430,7 +1925,8 @@ class App:
             os.chmod(path, 0o600)
 
         self._socket_path = path
-        logger.info("Serving on unix:%s (mode 0600)", path)
+        scheme = "https+unix" if ssl_context else "unix"
+        logger.info("Serving on %s:%s (mode 0600)", scheme, path)
         return server
 
     def _cleanup_socket(self) -> None:
