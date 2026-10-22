@@ -38,6 +38,48 @@ async def _build_metrics() -> str:
         f"veilrender_max_concurrent {browser_manager.total_capacity}\n"
     )
 
+    # Egress proxy — enforcement state and counters
+    egress = browser_manager.egress_proxy
+    parts.append(
+        "# HELP veilrender_egress_proxy_enabled Whether the enforcing egress proxy is running.\n"
+        "# TYPE veilrender_egress_proxy_enabled gauge\n"
+        f"veilrender_egress_proxy_enabled {1 if egress is not None else 0}\n"
+    )
+    if egress is not None:
+        parts.append(
+            "# HELP veilrender_egress_proxy_active_connections Client connections currently handled.\n"
+            "# TYPE veilrender_egress_proxy_active_connections gauge\n"
+            f"veilrender_egress_proxy_active_connections "
+            f"{egress.active_connections}\n"
+        )
+        parts.append(
+            "# HELP veilrender_egress_proxy_upstream_configured Whether traffic is chained through an upstream proxy.\n"
+            "# TYPE veilrender_egress_proxy_upstream_configured gauge\n"
+            f"veilrender_egress_proxy_upstream_configured "
+            f"{1 if egress.upstream is not None else 0}\n"
+        )
+        parts.append(
+            "# HELP veilrender_egress_proxy_requests_total Proxy requests received.\n"
+            "# TYPE veilrender_egress_proxy_requests_total counter\n"
+            f"veilrender_egress_proxy_requests_total {egress.stats.requests}\n"
+        )
+        parts.append(
+            "# HELP veilrender_egress_proxy_blocked_total Requests refused by the destination policy.\n"
+            "# TYPE veilrender_egress_proxy_blocked_total counter\n"
+            f"veilrender_egress_proxy_blocked_total {egress.stats.blocked}\n"
+        )
+        parts.append(
+            "# HELP veilrender_egress_proxy_canary_blocked_total Canary requests received through the proxy.\n"
+            "# TYPE veilrender_egress_proxy_canary_blocked_total counter\n"
+            f"veilrender_egress_proxy_canary_blocked_total "
+            f"{egress.stats.canary_blocked}\n"
+        )
+        parts.append(
+            "# HELP veilrender_egress_proxy_upstream_errors_total Failed upstream proxy connections.\n"
+            "# TYPE veilrender_egress_proxy_upstream_errors_total counter\n"
+            f"veilrender_egress_proxy_upstream_errors_total {egress.stats.upstream_errors}\n"
+        )
+
     # Per-worker gauges
     workers = await browser_manager.worker_stats()
     if len(workers) > 1 or (workers and workers[0]["endpoint"] != "local"):

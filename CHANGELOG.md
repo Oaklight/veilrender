@@ -7,11 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Blind SSRF closed with an enforcing egress proxy** — every browser tier sends its HTTP, HTTPS, and WebSocket traffic through an in-process proxy (`egress_proxy.py`). The proxy validates each destination, including redirect hops that Playwright route handlers cannot see, resolves it once, and connects only to the validated address. Non-global destinations are refused with `403` before any connection is made. This also removes the tier-fallback gap where Obscura's built-in private-network block was lost, and closes DNS rebinding for proxied traffic.
+- **UDP transports are outside the proxy** — WebRTC/QUIC do not traverse an HTTP proxy. Local Chromium is launched with `--disable-quic` and `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; remote Chromium workers must be launched with the same flags and Camoufox with `media.peerconnection.ice.proxy_only=true` (or WebRTC disabled), or these tiers need host-level egress rules. The HTTP proxy is not an egress firewall.
+- **Special-purpose ranges refused** — multicast, NAT64-encoded IPv4 (`64:ff9b::/96`, `64:ff9b:1::/48`), IPv4-compatible `::/96`, 6to4, Teredo, ORCHID, SRv6, documentation and benchmarking ranges are rejected even where `ipaddress.is_global` reports them as reachable.
+- **Remote Obscura workers are verified, not asserted** — `VEILRENDER_OBSCURA_REMOTE_PROXIED=true` is now backed by an HTTP and CONNECT canary at startup, after reconnects, and after restarts: each worker navigates to a `.invalid` host, and the request is refused only if it arrived through the proxy. A worker that ignores its proxy configuration is marked unhealthy instead of serving unprotected. Workers that are not declared proxied are still skipped.
+- **`/cdp` disabled by default** — raw CDP clients can create browser contexts outside the proxy. Local Chromium is now also launched with a browser-level `--proxy-server` (and `<-loopback>` bypass), so `/cdp`-created targets are still proxied; enable the endpoint explicitly with `VEILRENDER_CDP_ENABLED=true` and treat it as container-level access. When remote workers are configured, `/cdp` is rejected because the gateway cannot apply that launch-level proxy to them.
+- **Upstream DNS rebinding closed by default** — with `VEILRENDER_UPSTREAM_PROXY` set, the validated IP is now sent upstream instead of the hostname (`VEILRENDER_UPSTREAM_PIN_IP` defaults to `true`). Setting it to `false` forwards the hostname and is an explicit trade-off.
+- **Strict boolean parsing** — security-relevant `VEILRENDER_*` booleans accept `true/false`, `1/0`, `yes/no`, `on/off`; an empty value means unset, and any other unrecognised value aborts startup instead of silently disabling enforcement.
+- **Control characters rejected** — request targets, CONNECT authorities, and forwarded headers containing C0 controls/DEL are refused, and absolute-form targets are rebuilt from parsed components rather than forwarded verbatim.
+- **Proxy resource limits** — 10s request-header timeout, 5s DNS timeout, 30s drain timeout, 300s tunnel idle timeout, and a 1024-connection cap, so a slow or non-reading peer cannot pin handlers indefinitely.
+- **Corrected 0.6.3 changelog** — the route handler does not see redirect hops; the post-navigation URL validation is what stopped the response body from being returned, while the request itself was still issued.
+
+### Added
+
+- `VEILRENDER_UPSTREAM_PROXY` chains validated traffic through an operator-supplied HTTP, HTTPS, or SOCKS5 proxy; `VEILRENDER_UPSTREAM_PIN_IP` (default `true`) sends the validated IP instead of the hostname. Browser credentials are never exposed to the upstream.
+- Egress proxy configuration: `VEILRENDER_EGRESS_BIND`, `VEILRENDER_EGRESS_PORT`, `VEILRENDER_EGRESS_ADVERTISE`, `VEILRENDER_EGRESS_PROXY_TOKEN` (Basic auth, required for non-loopback binds), `VEILRENDER_CDP_ENABLED` (default `false`).
+- `/metrics` exposes `veilrender_egress_proxy_enabled`, `_upstream_configured`, `_active_connections`, `_requests_total`, `_blocked_total`, `_canary_blocked_total`, and `_upstream_errors_total`.
+- Chromium launch flags `--disable-quic` and `--force-webrtc-ip-handling-policy=disable_non_proxied_udp` for local browsers, keeping UDP-based transports off the direct network path.
+
+### Changed
+
+- Browser contexts are created with a proxy that sets `bypass=<-loopback>`, so Chromium cannot skip the proxy for loopback destinations.
+
 ## [0.6.3] - 2026-10-16
 
 ### Security
 
-- **SSRF via redirect** — the destination of every request the browser makes is now re-checked, and the URL a navigation actually landed on is validated before its content is returned. Previously only the submitted URL was validated, so a public URL that redirected to an internal address had the internal response body returned to the caller. Affected `/render` and `/screenshot`. Reported privately by a security researcher; see the published advisory for detail and credit.
+- **SSRF via redirect (response disclosure)** — the URL a navigation actually landed on is now validated before its content is returned. Previously only the submitted URL was validated, so a public URL that redirected to an internal address had the internal response body returned to the caller. Affected `/render` and `/screenshot`. Reported privately by a security researcher; see the published advisory for detail and credit. The browser still issued the redirected request (blind SSRF); that is closed in 0.6.4 by the egress proxy.
 - **Non-global addresses rejected** — the address check now uses `is_global` instead of an enumerated private-range denylist, so CGNAT (`100.64.0.0/10`) and other special-purpose ranges are refused rather than fetched.
 - **Destination check no longer tied to resource filtering** — the check is installed even when `VEILRENDER_RESOURCE_FILTER=false`. Previously that setting skipped the request filter entirely, which would have removed the destination check along with it.
 

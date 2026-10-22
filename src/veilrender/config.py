@@ -5,6 +5,41 @@ from __future__ import annotations
 import os
 
 
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"0", "false", "no", "off"})
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a boolean environment variable strictly.
+
+    Accepts the common true/false spellings and raises on anything else, so a
+    typo such as ``VEILRENDER_EGRESS_PROXY=enable`` stops the process instead
+    of silently disabling a security control.
+
+    Args:
+        name: Environment variable name.
+        default: Value used when the variable is unset.
+
+    Returns:
+        The parsed boolean.
+
+    Raises:
+        ValueError: If the variable is set to a value that is not a boolean.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value == "":
+        # `VAR=` is the conventional way to leave an optional variable unset.
+        return default
+    if value in _TRUTHY:
+        return True
+    if value in _FALSY:
+        return False
+    raise ValueError(f"{name} must be a boolean (true/false), got {raw!r}")
+
+
 def _parse_worker_entry(entry: str) -> tuple[str, str]:
     """Parse a worker entry into (protocol, endpoint).
 
@@ -68,10 +103,33 @@ class Settings:
             os.environ.get("VEILRENDER_WORKER_HEALTH_INTERVAL", "10")
         )
 
-        # Obscura lightweight browser (tier-0 with fallback to CloakBrowser)
-        self.obscura_enabled: bool = (
-            os.environ.get("VEILRENDER_OBSCURA", "false").lower() == "true"
+        # Egress enforcement proxy — every browser is pointed at this
+        # in-process proxy, which refuses destinations outside the global
+        # address space. Disabling it removes SSRF enforcement.
+        self.egress_proxy: bool = _env_bool("VEILRENDER_EGRESS_PROXY", True)
+        self.egress_bind: str = os.environ.get("VEILRENDER_EGRESS_BIND", "127.0.0.1")
+        self.egress_port: int = int(os.environ.get("VEILRENDER_EGRESS_PORT", "0"))
+        self.egress_advertise: str = os.environ.get("VEILRENDER_EGRESS_ADVERTISE", "")
+        self.egress_token: str | None = (
+            os.environ.get("VEILRENDER_EGRESS_PROXY_TOKEN") or None
         )
+        # The /cdp endpoint hands out raw browser control, including contexts
+        # that are not proxied. Off unless an operator explicitly enables it.
+        self.cdp_enabled: bool = _env_bool("VEILRENDER_CDP_ENABLED", False)
+        # Optional operator-supplied proxy to chain validated traffic through
+        self.upstream_proxy: str = os.environ.get("VEILRENDER_UPSTREAM_PROXY", "")
+        # Send the validated IP upstream rather than the hostname. Forwarding
+        # the hostname lets the upstream resolve again, reopening rebinding.
+        self.upstream_pin_ip: bool = _env_bool("VEILRENDER_UPSTREAM_PIN_IP", True)
+        # Set when a remote Obscura worker was started with --proxy pointing
+        # back at this instance; without it, such a worker is not used because
+        # its traffic cannot be enforced. The startup canary verifies it.
+        self.obscura_remote_proxied: bool = _env_bool(
+            "VEILRENDER_OBSCURA_REMOTE_PROXIED", False
+        )
+
+        # Obscura lightweight browser (tier-0 with fallback to CloakBrowser)
+        self.obscura_enabled: bool = _env_bool("VEILRENDER_OBSCURA", False)
         self.obscura_max_concurrent: int = int(
             os.environ.get(
                 "VEILRENDER_OBSCURA_MAX_CONCURRENT", str(self.max_concurrent)
@@ -88,9 +146,7 @@ class Settings:
         )
 
         # Opaque engine tag in X-Render-Engine response header
-        self.render_engine_header: bool = (
-            os.environ.get("VEILRENDER_ENGINE_HEADER", "false").lower() == "true"
-        )
+        self.render_engine_header: bool = _env_bool("VEILRENDER_ENGINE_HEADER", False)
 
         # Font download
         _fonts_raw = os.environ.get("VEILRENDER_FONTS", "")
@@ -105,18 +161,14 @@ class Settings:
         self.font_mirror: str = os.environ.get("VEILRENDER_FONT_MIRROR", "")
         self.font_css: str = os.environ.get("VEILRENDER_FONT_CSS", "")
 
-        self.resource_filter: bool = (
-            os.environ.get("VEILRENDER_RESOURCE_FILTER", "true").lower() == "true"
-        )
+        self.resource_filter: bool = _env_bool("VEILRENDER_RESOURCE_FILTER", True)
         _extra = os.environ.get("VEILRENDER_BLOCKED_DOMAINS_EXTRA", "")
         self.blocked_domains_extra: list[str] = (
             [d.strip() for d in _extra.split(",") if d.strip()] if _extra else []
         )
 
         # Cache settings
-        self.cache_enabled: bool = (
-            os.environ.get("VEILRENDER_CACHE_ENABLED", "false").lower() == "true"
-        )
+        self.cache_enabled: bool = _env_bool("VEILRENDER_CACHE_ENABLED", False)
         self.cache_ttl: int = int(os.environ.get("VEILRENDER_CACHE_TTL", "86400"))
         self.cache_l1_maxsize: int = int(
             os.environ.get("VEILRENDER_CACHE_L1_MAXSIZE", "100")
@@ -134,9 +186,7 @@ class Settings:
         self.s3_secret_key: str | None = os.environ.get("VEILRENDER_S3_SECRET_KEY")
         self.s3_bucket: str = os.environ.get("VEILRENDER_S3_BUCKET", "veilrender-cache")
         self.s3_region: str = os.environ.get("VEILRENDER_S3_REGION", "auto")
-        self.s3_secure: bool = (
-            os.environ.get("VEILRENDER_S3_SECURE", "true").lower() == "true"
-        )
+        self.s3_secure: bool = _env_bool("VEILRENDER_S3_SECURE", True)
 
 
 settings = Settings()

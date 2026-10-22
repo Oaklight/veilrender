@@ -171,11 +171,29 @@ All settings via `VEILRENDER_*` environment variables:
 | `VEILRENDER_WORKERS` | *(none)* | Comma-separated worker endpoints (enables pool mode) |
 | `VEILRENDER_WORKER_MAX_CONCURRENT` | `5` | Per-worker page concurrency |
 | `VEILRENDER_WORKER_HEALTH_INTERVAL` | `10` | Health check interval (seconds) |
+| `VEILRENDER_EGRESS_BIND` | `127.0.0.1` | Egress proxy bind address (`0.0.0.0` in pool mode) |
+| `VEILRENDER_EGRESS_PORT` | `0` | Egress proxy port (`0` = ephemeral; set a fixed port for pool mode) |
+| `VEILRENDER_EGRESS_ADVERTISE` | *(none)* | Proxy URL given to browsers (e.g. `http://gateway:7870`) |
+| `VEILRENDER_EGRESS_PROXY_TOKEN` | *(none)* | Proxy Basic-auth password; required for non-loopback binds |
+| `VEILRENDER_UPSTREAM_PROXY` | *(none)* | Optional upstream proxy (`http`, `https`, `socks5`) |
+| `VEILRENDER_UPSTREAM_PIN_IP` | `true` | Send the validated IP to the upstream proxy instead of the hostname |
+| `VEILRENDER_CDP_ENABLED` | `false` | Enable the raw `/cdp` endpoint (can bypass the proxy — trusted operators only) |
 
 Worker endpoint formats:
 - `cdp://host:9222` or `http://host:9222` — Chromium CDP worker
 - `playwright://host:1234/ws-path` — Firefox/Camoufox Playwright worker
 - `playwrights://host:1234/ws-path` — TLS Playwright worker
+
+> **Outbound request policy:** all HTTP(S)/WebSocket traffic from every
+> browser is routed through an in-process egress proxy that refuses
+> destinations outside the global address space, including each redirect hop.
+> It listens on loopback by default and needs no configuration for
+> single-instance deployments. Pool deployments must expose it to the worker
+> containers (see the pool examples below). A worker whose traffic does not
+> reach the proxy is disabled at startup. The raw `/cdp` endpoint is off by
+> default (`VEILRENDER_CDP_ENABLED=true` to opt in). WebRTC/QUIC UDP is not
+> proxied; see [SECURITY.md](SECURITY.md) for the browser flags remote workers
+> need.
 
 ### Browser Binary
 
@@ -217,6 +235,10 @@ services:
     image: oaklight/veilrender:gateway
     environment:
       - VEILRENDER_WORKERS=cdp://worker1:9222,cdp://worker2:9222
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?set a random token}
 
   worker1:
     image: cloakhq/cloakbrowser
@@ -237,6 +259,10 @@ services:
     image: oaklight/veilrender:gateway
     environment:
       - VEILRENDER_WORKERS=cdp://chromium:9222,playwright://camoufox:1234/ws
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?set a random token}
 
   chromium:
     image: cloakhq/cloakbrowser

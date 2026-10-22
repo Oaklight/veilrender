@@ -21,6 +21,12 @@ services:
       - VEILRENDER_WORKERS=http://browser-worker:9222
       - VEILRENDER_WORKER_MAX_CONCURRENT=${VEILRENDER_WORKER_MAX_CONCURRENT:-5}
       - VEILRENDER_WORKER_HEALTH_INTERVAL=${VEILRENDER_WORKER_HEALTH_INTERVAL:-10}
+      # Workers run in another container, so the egress proxy must be
+      # reachable on the compose network and authenticated.
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?set a random token}
     volumes:
       - veilrender-data:/data
     depends_on:

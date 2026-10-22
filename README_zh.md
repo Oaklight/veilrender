@@ -171,11 +171,20 @@ Prometheus 格式的指标输出，包括运行时间、请求计数器、缓存
 | `VEILRENDER_WORKERS` | *（无）* | 逗号分隔的工作节点端点（启用池模式） |
 | `VEILRENDER_WORKER_MAX_CONCURRENT` | `5` | 每工作节点的页面并发数 |
 | `VEILRENDER_WORKER_HEALTH_INTERVAL` | `10` | 健康检查间隔（秒） |
+| `VEILRENDER_EGRESS_BIND` | `127.0.0.1` | 出站代理绑定地址（池模式使用 `0.0.0.0`） |
+| `VEILRENDER_EGRESS_PORT` | `0` | 出站代理端口（`0` = 临时端口；池模式需固定端口） |
+| `VEILRENDER_EGRESS_ADVERTISE` | *（无）* | 提供给浏览器的代理 URL（如 `http://gateway:7870`） |
+| `VEILRENDER_EGRESS_PROXY_TOKEN` | *（无）* | 代理 Basic 认证密码；非回环绑定时必填 |
+| `VEILRENDER_UPSTREAM_PROXY` | *（无）* | 可选的上游代理（`http`、`https`、`socks5`） |
+| `VEILRENDER_UPSTREAM_PIN_IP` | `true` | 向上游代理发送已验证的 IP 而不是主机名 |
+| `VEILRENDER_CDP_ENABLED` | `false` | 启用原始 `/cdp` 端点（可绕过代理——仅限可信操作者） |
 
 工作节点端点格式：
 - `cdp://host:9222` 或 `http://host:9222` —— Chromium CDP 工作节点
 - `playwright://host:1234/ws-path` —— Firefox/Camoufox Playwright 工作节点
 - `playwrights://host:1234/ws-path` —— TLS Playwright 工作节点
+
+> **出站请求策略：**所有浏览器的 HTTP(S)/WebSocket 流量都经由进程内出站代理访问网络，该代理拒绝全局地址空间之外的目标，包括每一跳重定向。单实例部署默认监听回环地址，无需额外配置；池模式部署需要让工作节点容器能够访问它（见下方池模式示例）。流量未到达代理的工作节点会在启动时被禁用。原始 `/cdp` 端点默认关闭（设置 `VEILRENDER_CDP_ENABLED=true` 启用）。WebRTC/QUIC UDP 不经过代理；远程工作节点所需的浏览器参数见 [SECURITY.md](SECURITY.md)。
 
 ### 浏览器二进制文件
 
@@ -217,6 +226,10 @@ services:
     image: oaklight/veilrender:gateway
     environment:
       - VEILRENDER_WORKERS=cdp://worker1:9222,cdp://worker2:9222
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?请设置一个随机令牌}
 
   worker1:
     image: cloakhq/cloakbrowser
@@ -237,6 +250,10 @@ services:
     image: oaklight/veilrender:gateway
     environment:
       - VEILRENDER_WORKERS=cdp://chromium:9222,playwright://camoufox:1234/ws
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?请设置一个随机令牌}
 
   chromium:
     image: cloakhq/cloakbrowser

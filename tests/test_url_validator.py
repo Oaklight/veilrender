@@ -30,6 +30,7 @@ class TestValidateUrlRejectsNonPublic:
             "http://169.254.169.254/latest/meta-data/",
             "http://100.64.0.1/",  # CGNAT — the regression
             "http://100.127.255.254/",  # top of the CGNAT range
+            "http://[::ffff:127.0.0.1]/",  # IPv4-mapped loopback
         ],
     )
     def test_rejects_non_public_literal(self, url: str) -> None:
@@ -73,13 +74,34 @@ class TestIsGlobalHost:
             "192.168.0.1",
             "100.64.0.1",
             "0.0.0.0",
+            "::ffff:127.0.0.1",
+            "::ffff:10.0.0.1",
+            "224.0.0.1",
+            "239.255.255.250",
+            "ff02::1",
+            "192.0.2.1",  # TEST-NET-1
+            "64:ff9b::7f00:1",  # NAT64 encoding of 127.0.0.1
+            "64:ff9b::a9fe:a9fe",  # NAT64 encoding of 169.254.169.254
+            "64:ff9b:1::1",  # local-use NAT64
+            "2002:7f00:1::",  # 6to4 encoding of 127.0.0.1
+            "2001::1",  # Teredo
+            "5f00::1",  # SRv6 SIDs
             "",
         ],
     )
     def test_false_for_non_public(self, host: str) -> None:
         assert is_global_host(host) is False
 
-    @pytest.mark.parametrize("host", ["1.1.1.1", "8.8.8.8", "2606:4700:4700::1111"])
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "1.1.1.1",
+            "8.8.8.8",
+            "2606:4700:4700::1111",
+            "::ffff:8.8.8.8",
+            "64:ff9b::808:808",  # NAT64 encoding of 8.8.8.8
+        ],
+    )
     def test_true_for_public_literal(self, host: str) -> None:
         assert is_global_host(host) is True
 
