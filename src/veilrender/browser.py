@@ -304,6 +304,19 @@ class _BaseWorker:
     async def start(self) -> None:
         raise NotImplementedError
 
+    def _mark_started(self) -> None:
+        """Restore ``healthy`` after a start when there is nothing to attest.
+
+        With the egress proxy disabled there is no canary to run, and in
+        single-worker mode there is no health loop to run one later, so a
+        self-restart must mark itself usable or the worker stays dead until
+        the process restarts. With enforcement enabled ``BrowserManager`` owns
+        ``healthy`` and sets it only after a canary proves the proxy is in the
+        path.
+        """
+        if not settings.egress_proxy:
+            self.healthy = True
+
     async def stop(self) -> None:
         raise NotImplementedError
 
@@ -446,6 +459,7 @@ class LocalWorker(_BaseWorker):
             executable_path,
             self.cdp_port,
         )
+        self._mark_started()
 
     async def stop(self) -> None:
         self.healthy = False
@@ -570,6 +584,7 @@ class ObscuraWorker(_BaseWorker):
             executable_path,
             self.cdp_port,
         )
+        self._mark_started()
 
     async def stop(self) -> None:
         self.healthy = False
@@ -651,6 +666,7 @@ class RemoteWorker(_BaseWorker):
         await page.close()
         await ctx.close()
         logger.info("Connected to remote browser at %s (verified)", self.endpoint)
+        self._mark_started()
 
     async def stop(self) -> None:
         self.healthy = False
@@ -728,6 +744,7 @@ class PlaywrightWorker(_BaseWorker):
         logger.info(
             "Connected to Playwright/Firefox browser at %s (verified)", self.endpoint
         )
+        self._mark_started()
 
     async def stop(self) -> None:
         self.healthy = False
