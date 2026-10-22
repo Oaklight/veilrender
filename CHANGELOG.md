@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Canary attestation requires authentication** — when the proxy requires a token, canary requests are only recognised after `Proxy-Authorization` is verified, so an unauthenticated local process cannot forge a worker's attestation.
 - **Corrected 0.6.3 changelog** — the route handler does not see redirect hops; the post-navigation URL validation is what stopped the response body from being returned, while the request itself was still issued.
 
+### Upgrading to 0.6.4
+
+The egress proxy is enabled by default and changes how every browser reaches the network. Existing deployments need these changes:
+
+- **Worker pools** must expose the proxy to the worker containers: set `VEILRENDER_EGRESS_BIND=0.0.0.0`, a fixed `VEILRENDER_EGRESS_PORT`, `VEILRENDER_EGRESS_ADVERTISE`, and `VEILRENDER_EGRESS_PROXY_TOKEN`. A worker whose traffic cannot reach the proxy is disabled at startup rather than used unprotected.
+- **Remote Obscura** workers must be launched with `--proxy` pointing at the gateway proxy and declared with `VEILRENDER_OBSCURA_REMOTE_PROXIED=true`; otherwise they are not used.
+- **Remote Chromium/Camoufox** workers need the UDP launch flags described below (`--disable-quic`, `--force-webrtc-ip-handling-policy=disable_non_proxied_udp`; Camoufox: `media.peerconnection.ice.proxy_only=true`), because UDP does not traverse the HTTP proxy.
+- **`/cdp` is disabled by default.** Set `VEILRENDER_CDP_ENABLED=true` if you rely on it.
+- `VEILRENDER_EGRESS_PROXY=false` disables enforcement and is not supported for internet-facing deployments.
+
 ### Added
 
 - `VEILRENDER_UPSTREAM_PROXY` chains validated traffic through an operator-supplied HTTP, HTTPS, or SOCKS5 proxy; `VEILRENDER_UPSTREAM_PIN_IP` (default `true`) sends the validated IP instead of the hostname. Browser credentials are never exposed to the upstream.

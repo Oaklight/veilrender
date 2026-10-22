@@ -146,7 +146,7 @@ Prometheus 格式的指标输出，包括运行时间、请求计数器、缓存
 
 ### WS /cdp
 
-直接连接浏览器的 CDP WebSocket 代理。支持 `?worker=N` 参数指定池中的特定工作节点。
+直接连接浏览器的 CDP WebSocket 代理。支持 `?worker=N` 参数指定池中的特定工作节点。默认关闭（设置 `VEILRENDER_CDP_ENABLED=true` 启用）；原始 CDP 客户端可以创建绕过出站代理的上下文。
 
 ## 配置
 
@@ -184,7 +184,7 @@ Prometheus 格式的指标输出，包括运行时间、请求计数器、缓存
 - `playwright://host:1234/ws-path` —— Firefox/Camoufox Playwright 工作节点
 - `playwrights://host:1234/ws-path` —— TLS Playwright 工作节点
 
-> **出站请求策略：**所有浏览器的 HTTP(S)/WebSocket 流量都经由进程内出站代理访问网络，该代理拒绝全局地址空间之外的目标，包括每一跳重定向。单实例部署默认监听回环地址，无需额外配置；池模式部署需要让工作节点容器能够访问它（见下方池模式示例）。流量未到达代理的工作节点会在启动时被禁用。原始 `/cdp` 端点默认关闭（设置 `VEILRENDER_CDP_ENABLED=true` 启用）。WebRTC/QUIC UDP 不经过代理；远程工作节点所需的浏览器参数见 [SECURITY.md](SECURITY.md)。
+> **出站请求策略：**所有浏览器的 HTTP(S)/WebSocket 流量都经由进程内出站代理访问网络，该代理拒绝全局地址空间之外的目标，包括每一跳重定向。单实例部署默认监听回环地址，无需额外配置；池模式部署需要让工作节点容器能够访问它（见下方池模式示例）。流量未到达代理的工作节点会在启动时被禁用。原始 `/cdp` 端点默认关闭（设置 `VEILRENDER_CDP_ENABLED=true` 启用）。WebRTC/QUIC UDP 不经过代理；远程工作节点所需的浏览器参数见 [SECURITY.md](SECURITY.md)。池模式下若导航出现代理或隧道错误，请确认工作节点容器能访问 `VEILRENDER_EGRESS_ADVERTISE`，且 `VEILRENDER_EGRESS_PROXY_TOKEN` 一致。
 
 ### 浏览器二进制文件
 
