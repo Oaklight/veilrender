@@ -146,7 +146,7 @@ JSON API for live dashboard data (polled by the dashboard UI).
 
 ### WS /cdp
 
-Direct CDP WebSocket proxy to the browser. Supports `?worker=N` for targeting specific workers in a pool.
+Direct CDP WebSocket proxy to the browser. Supports `?worker=N` for targeting specific workers in a pool. Disabled by default (`VEILRENDER_CDP_ENABLED=true` to opt in); raw CDP clients can create contexts outside the egress proxy.
 
 ## Configuration
 
@@ -193,7 +193,9 @@ Worker endpoint formats:
 > reach the proxy is disabled at startup. The raw `/cdp` endpoint is off by
 > default (`VEILRENDER_CDP_ENABLED=true` to opt in). WebRTC/QUIC UDP is not
 > proxied; see [SECURITY.md](SECURITY.md) for the browser flags remote workers
-> need.
+> need. If pool-mode navigations fail with proxy or tunnel errors, check that
+> `VEILRENDER_EGRESS_ADVERTISE` is reachable from the worker containers and
+> that `VEILRENDER_EGRESS_PROXY_TOKEN` matches.
 
 ### Browser Binary
 
