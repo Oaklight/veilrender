@@ -11,6 +11,7 @@ import asyncio
 import base64
 import secrets
 import socket
+import threading
 from urllib.parse import urlsplit
 
 import pytest
@@ -220,7 +221,7 @@ class TestForwarding:
             await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, ("127.0.0.1", holder["port"]))]
 
         async def scenario() -> bytes:
@@ -243,6 +244,49 @@ class TestForwarding:
         assert response.endswith(b"hello")
         assert seen["head"].startswith(b"GET /hello?x=1 HTTP/1.1")
 
+    def test_absolute_form_host_rewritten_to_validated_authority(
+        self, monkeypatch
+    ) -> None:
+        seen: dict[str, bytes] = {}
+        holder = {"port": 0}
+
+        async def origin(reader, writer) -> None:
+            seen["head"] = await reader.readuntil(b"\r\n\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            await writer.drain()
+            writer.close()
+
+        async def resolve(host: str, port: int, **kwargs) -> list:
+            return [(socket.AF_INET, ("127.0.0.1", holder["port"]))]
+
+        async def scenario() -> bytes:
+            server, holder["port"] = await _start(origin)
+            proxy = EgressProxy()
+            await proxy.start()
+            try:
+                return await _send(
+                    proxy,
+                    b"GET http://public.test/ HTTP/1.1\r\n"
+                    b"Host: attacker.test\r\n"
+                    b"Host: public.test\r\n"
+                    b"X-Test: 1\r\n\r\n",
+                )
+            finally:
+                await proxy.stop()
+                await _stop(server)
+
+        monkeypatch.setattr(egress_proxy, "_resolve_addresses", resolve)
+        response = asyncio.run(scenario())
+        assert b" 200 " in _status(response)
+        head = seen["head"]
+        host_lines = [
+            line for line in head.split(b"\r\n") if line.lower().startswith(b"host:")
+        ]
+        assert host_lines == [b"Host: public.test"]
+        assert b"X-Test: 1" in head
+
     def test_connect_tunnel_relays_bytes(self, monkeypatch) -> None:
         holder = {"port": 0}
 
@@ -255,7 +299,7 @@ class TestForwarding:
                 await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, ("127.0.0.1", holder["port"]))]
 
         async def scenario() -> bytes:
@@ -378,7 +422,7 @@ class TestUpstreamChaining:
                 await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, _DUMMY_PUBLIC)]
 
         async def scenario() -> bytes:
@@ -423,7 +467,7 @@ class TestUpstreamChaining:
             await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, _DUMMY_PUBLIC)]
 
         async def scenario() -> bytes:
@@ -477,7 +521,7 @@ class TestUpstreamChaining:
                 await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, _DUMMY_PUBLIC)]
 
         async def scenario() -> bytes:
@@ -515,7 +559,7 @@ class TestUpstreamChaining:
             await writer.drain()
             writer.close()
 
-        async def resolve(host: str, port: int) -> list:
+        async def resolve(host: str, port: int, **kwargs) -> list:
             return [(socket.AF_INET, _DUMMY_PUBLIC)]
 
         async def scenario() -> None:
@@ -627,6 +671,55 @@ class TestRequestHardening:
                 await proxy.stop()
 
         assert b" 400 " in _status(asyncio.run(scenario()))
+
+
+class TestDnsIsolation:
+    def test_lookup_runs_on_dedicated_executor(self, monkeypatch) -> None:
+        seen: dict[str, object] = {}
+        release = threading.Event()
+
+        def slow_getaddrinfo(host, port, **kwargs):
+            seen["thread"] = threading.current_thread().name
+            release.wait(5)
+            return [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    socket.IPPROTO_TCP,
+                    "",
+                    ("93.184.216.34", port),
+                )
+            ]
+
+        monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+
+        async def scenario():
+            proxy = EgressProxy()
+            task = asyncio.create_task(proxy._resolve("slow.test", 80))
+            try:
+                for _ in range(200):
+                    if "thread" in seen:
+                        break
+                    await asyncio.sleep(0.01)
+                assert "thread" in seen, "lookup never started"
+                # A stalled lookup must not occupy the loop's shared default
+                # executor, which other parts of the process rely on.
+                loop = asyncio.get_running_loop()
+                assert (
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: "ok"), timeout=1
+                    )
+                    == "ok"
+                )
+            finally:
+                release.set()
+            addresses = await task
+            await proxy.stop()
+            return addresses
+
+        addresses = asyncio.run(scenario())
+        assert str(seen["thread"]).startswith("egress-dns")
+        assert addresses[0][1][0] == "93.184.216.34"
 
 
 class TestCanary:

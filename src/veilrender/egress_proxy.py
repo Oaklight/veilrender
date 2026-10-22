@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
 import hmac
 import ipaddress
 import logging
@@ -42,8 +43,10 @@ _MAX_CONNECTIONS = 1024
 _HEADER_TIMEOUT = 10.0
 _CONNECT_TIMEOUT = 15.0
 _DNS_TIMEOUT = 5.0
+_DNS_WORKERS = 8
+_DNS_MAX_INFLIGHT = 32
 _DRAIN_TIMEOUT = 30.0
-_IDLE_TIMEOUT = 300.0
+_IDLE_TIMEOUT = 60.0
 _IO_CHUNK = 65536
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -213,8 +216,23 @@ def _select_global_addresses(host: str, infos: list[tuple]) -> list[tuple[int, t
     return addresses
 
 
-async def _resolve_addresses(host: str, port: int) -> list[tuple[int, tuple]]:
-    """Resolve a hostname and return only validated global addresses."""
+async def _resolve_addresses(
+    host: str,
+    port: int,
+    *,
+    executor: concurrent.futures.Executor | None = None,
+    semaphore: asyncio.Semaphore | None = None,
+) -> list[tuple[int, tuple]]:
+    """Resolve a hostname and return only validated global addresses.
+
+    A blocking lookup cannot be interrupted, so a lookup that exceeds the
+    timeout keeps its thread busy until the system resolver returns. When an
+    ``executor`` is supplied the lookup runs there — a small pool dedicated to
+    DNS — instead of the loop's shared default executor, and ``semaphore``
+    caps how many lookups may be in flight. The timeout then bounds only how
+    long a caller waits; it no longer leaves unrelated ``run_in_executor``
+    work queued behind a stalled resolver.
+    """
     host = host.strip()
     if host.startswith("[") and host.endswith("]"):
         host = host[1:-1]
@@ -234,13 +252,30 @@ async def _resolve_addresses(host: str, port: int) -> list[tuple[int, tuple]]:
         )
         return [(family, sockaddr)]
 
-    try:
-        infos = await asyncio.wait_for(
-            asyncio.get_running_loop().getaddrinfo(
+    loop = asyncio.get_running_loop()
+
+    async def lookup() -> list[tuple]:
+        if executor is None:
+            return await loop.getaddrinfo(
                 host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
-            ),
-            timeout=_DNS_TIMEOUT,
-        )
+            )
+        if semaphore is None:
+            return await loop.run_in_executor(
+                executor,
+                lambda: socket.getaddrinfo(
+                    host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+                ),
+            )
+        async with semaphore:
+            return await loop.run_in_executor(
+                executor,
+                lambda: socket.getaddrinfo(
+                    host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
+                ),
+            )
+
+    try:
+        infos = await asyncio.wait_for(lookup(), timeout=_DNS_TIMEOUT)
     except asyncio.TimeoutError as exc:
         raise EgressPolicyError(f"DNS resolution timed out for '{host}'") from exc
     except (socket.gaierror, UnicodeError) as exc:
@@ -311,8 +346,15 @@ def _rebuild_head(
     extra: list[str] | None = None,
     *,
     force_close: bool = False,
+    host_header: str | None = None,
 ) -> bytes:
     """Rebuild a request head, dropping proxy-only headers.
+
+    When ``host_header`` is given, every client-supplied ``Host`` line is
+    dropped and replaced with the validated authority. Forwarding the client's
+    value would let the request reach the validated IP with a different
+    virtual host than the one the policy checked, and duplicate ``Host`` lines
+    are ambiguous to intermediaries.
 
     ``force_close`` is used when relaying plain HTTP through an upstream
     proxy. A kept-alive connection to a proxy can carry a request for a
@@ -327,10 +369,14 @@ def _rebuild_head(
         key = line.split(b":", 1)[0].strip().lower()
         if key in drop:
             continue
+        if host_header is not None and key == b"host":
+            continue
         text = line.decode("latin-1")
         if _has_forbidden_header_chars(text):
             raise EgressPolicyError("Control characters in request header")
         out.append(text)
+    if host_header is not None:
+        out.append(f"Host: {host_header}")
     if force_close:
         out.append("Connection: close")
     if extra:
@@ -366,6 +412,10 @@ class EgressProxy:
         self._server: asyncio.Server | None = None
         self._active_connections = 0
         self._canary_events: dict[str, asyncio.Event] = {}
+        # DNS gets its own pool: a lookup that times out cannot be cancelled,
+        # so it must not occupy the loop's shared default executor.
+        self._dns_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._dns_semaphore: asyncio.Semaphore | None = None
 
     @classmethod
     def from_settings(cls) -> EgressProxy:
@@ -519,10 +569,25 @@ class EgressProxy:
             except Exception:
                 pass
             self._server = None
+        if self._dns_executor is not None:
+            self._dns_executor.shutdown(wait=False, cancel_futures=True)
+            self._dns_executor = None
+            self._dns_semaphore = None
 
     # ------------------------------------------------------------------
     # Connection handling
     # ------------------------------------------------------------------
+
+    async def _resolve(self, host: str, port: int) -> list[tuple[int, tuple]]:
+        """Resolve through this proxy's dedicated, bounded DNS pool."""
+        if self._dns_executor is None:
+            self._dns_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=_DNS_WORKERS, thread_name_prefix="egress-dns"
+            )
+            self._dns_semaphore = asyncio.Semaphore(_DNS_MAX_INFLIGHT)
+        return await _resolve_addresses(
+            host, port, executor=self._dns_executor, semaphore=self._dns_semaphore
+        )
 
     async def _handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -563,18 +628,6 @@ class EgressProxy:
 
             if _has_control_chars(target):
                 raise EgressPolicyError("Control characters in request target")
-            if self._mark_canary(target):
-                # Canary requests are refused on receipt, before DNS, so the
-                # attestation works regardless of how .invalid is resolved.
-                self.stats.canary_blocked += 1
-                logger.debug("Egress canary received")
-                await self._respond(
-                    writer,
-                    403,
-                    "Forbidden",
-                    "Destination blocked by outbound request policy",
-                )
-                return
 
             if not self._authorized(headers):
                 await self._respond(
@@ -583,6 +636,21 @@ class EgressProxy:
                     "Proxy Authentication Required",
                     "Proxy authentication required",
                     extra_headers=['Proxy-Authenticate: Basic realm="veilrender"'],
+                )
+                return
+
+            if self._mark_canary(target):
+                # Canary requests are refused on receipt, before DNS, so the
+                # attestation works regardless of how .invalid is resolved.
+                # Only authenticated peers get here: otherwise any local
+                # process could forge the attestation.
+                self.stats.canary_blocked += 1
+                logger.debug("Egress canary received")
+                await self._respond(
+                    writer,
+                    403,
+                    "Forbidden",
+                    "Destination blocked by outbound request policy",
                 )
                 return
 
@@ -656,7 +724,7 @@ class EgressProxy:
     ) -> asyncio.StreamWriter:
         """Open a CONNECT tunnel and relay it until either side closes."""
         host, port = _split_authority(authority, 443)
-        addresses = await _resolve_addresses(host, port)
+        addresses = await self._resolve(host, port)
 
         initial = b""
         if self.upstream is not None:
@@ -706,10 +774,13 @@ class EgressProxy:
         if _has_control_chars(host):
             raise EgressPolicyError("Control characters in destination host")
 
-        addresses = await _resolve_addresses(host, port)
+        addresses = await self._resolve(host, port)
         origin_target = parsed.path or "/"
         if parsed.query:
             origin_target = f"{origin_target}?{parsed.query}"
+        # The request reaches a validated IP; Host must name the authority
+        # the policy actually checked, not whatever the client supplied.
+        host_header = _format_authority(host, parsed.port)
 
         if self.upstream is not None and self.upstream.scheme == "socks5":
             up_reader, up_writer = await self._connect_via_socks(host, port, addresses)
@@ -732,7 +803,14 @@ class EgressProxy:
             force_close = False
 
         up_writer.write(
-            _rebuild_head(headers, request_line, extra, force_close=force_close) + rest
+            _rebuild_head(
+                headers,
+                request_line,
+                extra,
+                force_close=force_close,
+                host_header=host_header,
+            )
+            + rest
         )
         await _drain(up_writer)
         await self._tunnel(reader, writer, up_reader, up_writer)
