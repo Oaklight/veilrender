@@ -22,6 +22,7 @@ from typing import Any, Literal
 from patchright.async_api import Browser, BrowserContext, Page, async_playwright
 
 from veilrender.config import settings
+from veilrender.egress_proxy import EgressProxy
 from veilrender.filters import load_blocklist, make_route_handler
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,9 @@ class _BaseWorker:
         self.healthy = False
         self._stuck_since: float | None = None
         self._last_active: int = 0
+        # Set by BrowserManager before start(): browser-level proxy used by
+        # engines whose startup can be configured (LocalWorker, ObscuraWorker).
+        self.proxy_url: str | None = None
 
     async def start(self) -> None:
         raise NotImplementedError
@@ -334,6 +338,7 @@ class _BaseWorker:
         device_scale_factor: float | None = None,
         color_scheme: str | None = None,
         route_handler: Callable | None = None,
+        browser_proxy: dict[str, str] | None = None,
     ) -> AsyncIterator[tuple[BrowserContext, Page]]:
         async with self._semaphore:
             browser = await self.ensure_ready()
@@ -351,6 +356,8 @@ class _BaseWorker:
                     context_kwargs["device_scale_factor"] = device_scale_factor
                 if color_scheme is not None:
                     context_kwargs["color_scheme"] = color_scheme
+                if browser_proxy is not None:
+                    context_kwargs["proxy"] = browser_proxy
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
                 if route_handler:
@@ -392,9 +399,22 @@ class LocalWorker(_BaseWorker):
             "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-gpu",
+            # All HTTP(S) traffic goes through the egress proxy; keep QUIC and
+            # non-proxied WebRTC UDP from becoming a direct network path.
+            "--disable-quic",
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             *stealth_args,
-            "about:blank",
         ]
+        if self.proxy_url:
+            # Browser-level proxy covers contexts this process does not create
+            # itself, such as targets opened over the /cdp endpoint.
+            chrome_args.extend(
+                [
+                    f"--proxy-server={self.proxy_url}",
+                    "--proxy-bypass-list=<-loopback>",
+                ]
+            )
+        chrome_args.append("about:blank")
 
         self._chrome_proc = subprocess.Popen(
             chrome_args,
@@ -421,7 +441,6 @@ class LocalWorker(_BaseWorker):
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.connect_over_cdp(cdp_url)
-        self.healthy = True
         logger.info(
             "Local browser started (CloakBrowser %s, CDP on :%d)",
             executable_path,
@@ -455,6 +474,7 @@ class LocalWorker(_BaseWorker):
             browser_dead = self._browser is None or not self._browser.is_connected()
             if chrome_dead or browser_dead:
                 logger.warning("Local browser not connected, restarting...")
+                self.healthy = False
                 await self.stop()
                 await self.start()
             assert self._browser is not None
@@ -514,6 +534,8 @@ class ObscuraWorker(_BaseWorker):
             f"--port={self.cdp_port}",
             "--stealth",
         ]
+        if self.proxy_url:
+            obscura_args.append(f"--proxy={self.proxy_url}")
 
         self._proc = subprocess.Popen(
             obscura_args,
@@ -543,7 +565,6 @@ class ObscuraWorker(_BaseWorker):
 
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.connect_over_cdp(cdp_url)
-        self.healthy = True
         logger.info(
             "Obscura browser started (%s, CDP on :%d)",
             executable_path,
@@ -575,6 +596,7 @@ class ObscuraWorker(_BaseWorker):
             browser_dead = self._browser is None or not self._browser.is_connected()
             if proc_dead or browser_dead:
                 logger.warning("Obscura not connected, restarting...")
+                self.healthy = False
                 await self.stop()
                 await self.start()
             assert self._browser is not None
@@ -628,7 +650,6 @@ class RemoteWorker(_BaseWorker):
         page = await ctx.new_page()
         await page.close()
         await ctx.close()
-        self.healthy = True
         logger.info("Connected to remote browser at %s (verified)", self.endpoint)
 
     async def stop(self) -> None:
@@ -649,6 +670,7 @@ class RemoteWorker(_BaseWorker):
                 logger.warning(
                     "Remote browser %s disconnected, reconnecting...", self.endpoint
                 )
+                self.healthy = False
                 await self.stop()
                 await self.start()
             assert self._browser is not None
@@ -703,7 +725,6 @@ class PlaywrightWorker(_BaseWorker):
         page = await ctx.new_page()
         await page.close()
         await ctx.close()
-        self.healthy = True
         logger.info(
             "Connected to Playwright/Firefox browser at %s (verified)", self.endpoint
         )
@@ -727,6 +748,7 @@ class PlaywrightWorker(_BaseWorker):
                     "Playwright browser %s disconnected, reconnecting...",
                     self.endpoint,
                 )
+                self.healthy = False
                 await self.stop()
                 await self.start()
             assert self._browser is not None
@@ -767,6 +789,15 @@ class BrowserManager:
                         PlaywrightWorker(endpoint, settings.worker_max_concurrent)
                     )
                 elif protocol == "obscura":
+                    if settings.egress_proxy and not settings.obscura_remote_proxied:
+                        logger.error(
+                            "Not using remote Obscura worker %s: its traffic "
+                            "cannot be enforced by the egress proxy. Start it "
+                            "with --proxy pointing at this instance and set "
+                            "VEILRENDER_OBSCURA_REMOTE_PROXIED=true.",
+                            endpoint,
+                        )
+                        continue
                     w = RemoteWorker(endpoint, settings.worker_max_concurrent)
                     w.tier = 0
                     self._workers.append(w)
@@ -788,6 +819,7 @@ class BrowserManager:
 
         self._health_task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._queue_depth: int = 0
+        self._egress_proxy: EgressProxy | None = None
 
         self._blocklist = (
             load_blocklist(settings.blocked_domains_extra)
@@ -800,17 +832,135 @@ class BrowserManager:
         self._route_handler = make_route_handler(self._blocklist)
 
     async def start(self) -> None:
+        # The proxy starts first: every worker is configured to use it, and
+        # Obscura can only be pointed at it at process launch.
+        if settings.egress_proxy:
+            self._egress_proxy = EgressProxy.from_settings()
+            await self._egress_proxy.start()
+            for w in self._workers:
+                if isinstance(w, ObscuraWorker):
+                    w.proxy_url = self._egress_proxy.obscura_proxy_url
+                elif isinstance(w, LocalWorker):
+                    w.proxy_url = self._egress_proxy.server_url
+            if self._egress_proxy.advertised_host_is_loopback and any(
+                isinstance(w, (RemoteWorker, PlaywrightWorker)) for w in self._workers
+            ):
+                logger.warning(
+                    "Remote workers cannot reach the egress proxy at %s; set "
+                    "VEILRENDER_EGRESS_ADVERTISE (and "
+                    "VEILRENDER_EGRESS_PROXY_TOKEN when the bind is not "
+                    "loopback)",
+                    self._egress_proxy.server_url,
+                )
+        else:
+            logger.warning(
+                "Egress proxy disabled (VEILRENDER_EGRESS_PROXY=false): "
+                "outbound destinations are not enforced"
+            )
+
         for w in self._workers:
             try:
                 await w.start()
             except Exception:
                 logger.error("Failed to start worker %s", w.endpoint, exc_info=True)
                 w.healthy = False
+            else:
+                # A started worker is not trusted until it proves that its
+                # traffic reaches the egress proxy.
+                w.healthy = await self._verify_worker(w)
+                if not w.healthy and self._egress_proxy is not None:
+                    logger.error(
+                        "Worker %s did not route traffic through the egress "
+                        "proxy; marking it unhealthy",
+                        w.endpoint,
+                    )
         healthy_count = sum(1 for w in self._workers if w.healthy)
         if healthy_count == 0:
             logger.warning("0 of %d workers healthy at startup", len(self._workers))
-        if not self._is_local:
+        # The loop reconnects dead workers and re-attests the egress path, so
+        # it also runs in single-worker mode when enforcement is enabled.
+        if not self._is_local or self._egress_proxy is not None:
             self._health_task = asyncio.create_task(self._health_loop())
+
+    async def _verify_worker(self, worker: _BaseWorker) -> bool:
+        """Attest that a worker's traffic actually reaches the egress proxy.
+
+        Canary navigations use a ``.invalid`` hostname, so the browser can
+        only deliver them to the proxy by forwarding them. The proxy refuses
+        each token on receipt, before DNS, which distinguishes a proxied
+        browser from one that resolves the name itself. Both plain HTTP and
+        CONNECT (HTTPS) are checked, and local engines are additionally
+        checked through their browser-level proxy (the path used by /cdp).
+        """
+        proxy = self._egress_proxy
+        if proxy is None:
+            return True
+
+        try:
+            browser = await worker.ensure_ready()
+        except Exception:
+            logger.warning(
+                "Egress canary could not run for %s",
+                worker.endpoint,
+                exc_info=True,
+            )
+            return False
+
+        # Obscura ignores per-context proxy settings and is configured at
+        # launch; every other engine takes the context proxy.
+        context_proxy = (
+            None if isinstance(worker, ObscuraWorker) else proxy.playwright_proxy()
+        )
+        if not await self._run_canary(browser, context_proxy):
+            return False
+
+        # Local engines also run a browser-level proxy, which covers contexts
+        # created outside BrowserManager (the /cdp endpoint). Verify that
+        # path only when no auth is required: Chromium's --proxy-server does
+        # not carry credentials.
+        if isinstance(worker, (LocalWorker, ObscuraWorker)) and proxy.token is None:
+            if context_proxy is None:
+                return True  # Obscura's canary already used the launch proxy
+            return await self._run_canary(browser, None)
+        return True
+
+    async def _run_canary(
+        self,
+        browser: Browser,
+        context_proxy: dict[str, str] | None,
+    ) -> bool:
+        """Run plain-HTTP and CONNECT canaries in a fresh context."""
+        proxy = self._egress_proxy
+        if proxy is None:
+            return True
+        for scheme in ("http", "https"):
+            url, token = proxy.canary_url(scheme)
+            context: BrowserContext | None = None
+            try:
+                context_kwargs: dict[str, Any] = {}
+                if context_proxy is not None:
+                    context_kwargs["proxy"] = context_proxy
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+                try:
+                    await page.goto(url, wait_until="commit", timeout=8000)
+                except Exception:
+                    pass  # a refusal may surface as a navigation error
+                if not await proxy.wait_canary(token, timeout=2.0):
+                    return False
+            except Exception:
+                logger.warning(
+                    "Egress canary (%s) could not run", scheme, exc_info=True
+                )
+                return False
+            finally:
+                proxy.discard_canary(token)
+                if context is not None:
+                    try:
+                        await context.close()
+                    except Exception:
+                        pass
+        return True
 
     async def stop(self) -> None:
         if self._health_task:
@@ -822,6 +972,9 @@ class BrowserManager:
             self._health_task = None
         for w in self._workers:
             await w.stop()
+        if self._egress_proxy is not None:
+            await self._egress_proxy.stop()
+            self._egress_proxy = None
         logger.info("Browser stopped")
 
     async def _health_loop(self) -> None:
@@ -840,11 +993,21 @@ class BrowserManager:
                         logger.info("Attempting reconnect to %s", w.endpoint)
                         try:
                             await w.ensure_ready()
+                            # Reconnection is not enough: attest the egress
+                            # path again before the worker can be selected.
+                            w.healthy = await self._verify_worker(w)
                         except Exception:
                             logger.debug("Reconnect failed for %s", w.endpoint)
                     elif alive and not w.healthy:
-                        w.healthy = True
-                        logger.info("Worker %s recovered", w.endpoint)
+                        if await self._verify_worker(w):
+                            w.healthy = True
+                            logger.info("Worker %s recovered", w.endpoint)
+                        else:
+                            logger.error(
+                                "Worker %s is alive but does not route through "
+                                "the egress proxy; keeping it disabled",
+                                w.endpoint,
+                            )
 
                     # Stuck detection: active slots not changing for too long
                     cur_active = w.active
@@ -867,6 +1030,14 @@ class BrowserManager:
                                     "Failed to restart stuck worker %s",
                                     w.endpoint,
                                     exc_info=True,
+                                )
+                            w.healthy = await self._verify_worker(w)
+                            if not w.healthy and self._egress_proxy is not None:
+                                logger.error(
+                                    "Restarted worker %s does not route "
+                                    "through the egress proxy; marking it "
+                                    "unhealthy",
+                                    w.endpoint,
                                 )
                             w._stuck_since = None
                             w._last_active = 0
@@ -899,6 +1070,18 @@ class BrowserManager:
     @property
     def is_browser_alive(self) -> bool:
         return any(w.is_alive for w in self._workers)
+
+    @property
+    def has_remote_workers(self) -> bool:
+        """Whether the pool contains browsers this process cannot launch."""
+        return any(
+            isinstance(w, (RemoteWorker, PlaywrightWorker)) for w in self._workers
+        )
+
+    @property
+    def egress_proxy(self) -> EgressProxy | None:
+        """The enforcing egress proxy, or None when it is disabled."""
+        return self._egress_proxy
 
     @property
     def total_capacity(self) -> int:
@@ -944,6 +1127,12 @@ class BrowserManager:
     async def get_cdp_url(
         self, worker_index: int | None = None, *, min_tier: int = 1
     ) -> str | None:
+        if settings.egress_proxy and self.has_remote_workers:
+            logger.warning(
+                "/cdp is unavailable while remote workers are configured: "
+                "only contexts created by VeilRender are proxied on them"
+            )
+            return None
         if worker_index is not None and 0 <= worker_index < len(self._workers):
             w = self._workers[worker_index]
             if w.healthy and w.worker_type == "cdp":
@@ -981,6 +1170,11 @@ class BrowserManager:
                 device_scale_factor=device_scale_factor,
                 color_scheme=color_scheme,
                 route_handler=self._route_handler,
+                browser_proxy=(
+                    self._egress_proxy.playwright_proxy()
+                    if self._egress_proxy is not None
+                    else None
+                ),
             ) as (ctx, page):
                 yield ctx, page, engine_label, worker.force_wait_until
         finally:

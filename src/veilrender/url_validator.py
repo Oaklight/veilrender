@@ -114,7 +114,7 @@ def _check_resolved_ips(hostname: str) -> None:
     # Check if hostname is a raw IP literal
     try:
         addr = ipaddress.ip_address(hostname)
-        if _is_blocked_ip(addr):
+        if is_blocked_ip(addr):
             raise URLValidationError(f"IP address {hostname} is in a blocked range")
         return
     except ValueError:
@@ -137,7 +137,7 @@ def _check_resolved_ips(hostname: str) -> None:
         ip_str = sockaddr[0]
         try:
             addr = ipaddress.ip_address(ip_str)
-            if _is_blocked_ip(addr):
+            if is_blocked_ip(addr):
                 raise URLValidationError(
                     f"'{hostname}' resolves to blocked IP {ip_str}"
                 )
@@ -145,20 +145,82 @@ def _check_resolved_ips(hostname: str) -> None:
             continue
 
 
-def _is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+_SPECIAL_PURPOSE_NETWORKS = tuple(
+    ipaddress.ip_network(net)
+    for net in (
+        "192.0.0.0/24",  # IETF protocol assignments
+        "192.88.99.0/24",  # 6to4 relay anycast (deprecated)
+        "198.18.0.0/15",  # benchmarking
+        "240.0.0.0/4",  # reserved, incl. broadcast
+        "64:ff9b:1::/48",  # local-use NAT64
+        "::/96",  # IPv4-compatible (deprecated)
+        "100::/64",  # discard-only
+        "2001::/32",  # Teredo (embeds IPv4)
+        "2001:2::/48",  # benchmarking
+        "2001:10::/28",  # ORCHID
+        "2001:20::/28",  # ORCHIDv2
+        "2001:db8::/32",  # documentation
+        "2002::/16",  # 6to4 (embeds IPv4)
+        "3fff::/20",  # documentation
+        "5f00::/16",  # SRv6 SIDs
+    )
+)
+
+_NAT64_WELL_KNOWN = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _embedded_ipv4(
+    addr: ipaddress.IPv4Address | ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | None:
+    """Return the IPv4 address encoded in an IPv6 transition prefix.
+
+    ``::ffff:a.b.c.d`` and the NAT64 well-known prefix ``64:ff9b::/96`` both
+    carry an IPv4 address in their low 32 bits. Checking the embedded address
+    is what stops ``64:ff9b::7f00:1`` from being treated as a public address.
+    Some supported Python versions also report IPv4-mapped addresses as
+    globally routable, so this applies to ``::ffff:`` too.
+    """
+    if not isinstance(addr, ipaddress.IPv6Address):
+        return None
+    if addr.ipv4_mapped is not None:
+        return addr.ipv4_mapped
+    if addr in _NAT64_WELL_KNOWN:
+        return ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+    return None
+
+
+def is_blocked_ip(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Check whether an IP address is outside the globally routable space.
 
-    This is an allowlist (``is_global``) rather than an enumerated denylist,
-    so ranges that are neither loopback nor ``is_private`` are rejected too:
+    This is an allowlist (``is_global``) plus explicit refusals for ranges
+    that ``is_global`` reports as reachable but that must not be dialed:
+    multicast, reserved, unspecified, link-local, loopback, IPv4-mapped and
+    NAT64-encoded addresses (checked as the embedded IPv4 address), and the
+    special-purpose transition/documentation ranges listed above.
 
-        - Loopback (127.0.0.0/8, ::1)
-        - Private networks (10/8, 172.16/12, 192.168/16)
-        - Link-local, including cloud metadata (169.254/16, fe80::/10)
-        - CGNAT / shared address space (100.64.0.0/10)
-        - Unique local (fc00::/7), multicast, reserved, unspecified,
-          benchmarking (198.18.0.0/15) and other special-purpose ranges
+    Args:
+        addr: Parsed IP address.
+
+    Returns:
+        True if the address must not be connected to.
     """
-    return not addr.is_global
+    embedded = _embedded_ipv4(addr)
+    if embedded is not None:
+        addr = embedded
+
+    if (
+        addr.is_multicast
+        or addr.is_reserved
+        or addr.is_unspecified
+        or addr.is_link_local
+        or addr.is_loopback
+    ):
+        return True
+    if not addr.is_global:
+        return True
+    return any(
+        addr in net for net in _SPECIAL_PURPOSE_NETWORKS if net.version == addr.version
+    )
 
 
 def is_global_host(hostname: str) -> bool:
@@ -184,7 +246,7 @@ def is_global_host(hostname: str) -> bool:
         return False
 
     try:
-        return not _is_blocked_ip(ipaddress.ip_address(host))
+        return not is_blocked_ip(ipaddress.ip_address(host))
     except ValueError:
         pass  # Not an IP literal, resolve it below
 
@@ -198,7 +260,7 @@ def is_global_host(hostname: str) -> bool:
             addr = ipaddress.ip_address(sockaddr[0])
         except ValueError:
             continue
-        if _is_blocked_ip(addr):
+        if is_blocked_ip(addr):
             return False
 
     return bool(results)

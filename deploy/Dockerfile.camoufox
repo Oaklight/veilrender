@@ -27,5 +27,8 @@ RUN python -m camoufox fetch
 RUN useradd -m -u 1000 user || true
 USER 1000
 
+# Note: WebRTC/QUIC UDP does not traverse the gateway's HTTP egress proxy.
+# Run this container behind host/network egress rules (see SECURITY.md), or
+# launch the browser with media.peerconnection.ice.proxy_only=true.
 EXPOSE 1234
 CMD ["python", "-m", "camoufox", "server", "--headless", "--port", "1234", "--ws-path", "ws"]

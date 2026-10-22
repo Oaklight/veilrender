@@ -27,6 +27,14 @@ services:
       - VEILRENDER_WORKER_MAX_CONCURRENT=${VEILRENDER_WORKER_MAX_CONCURRENT:-5}
       - VEILRENDER_WORKER_HEALTH_INTERVAL=${VEILRENDER_WORKER_HEALTH_INTERVAL:-10}
       - VEILRENDER_ENGINE_HEADER=${VEILRENDER_ENGINE_HEADER:-false}
+      # Workers run in other containers, so the egress proxy must be
+      # reachable on the compose network and authenticated.
+      - VEILRENDER_EGRESS_BIND=0.0.0.0
+      - VEILRENDER_EGRESS_PORT=7870
+      - VEILRENDER_EGRESS_ADVERTISE=http://veilrender:7870
+      - VEILRENDER_EGRESS_PROXY_TOKEN=${VEILRENDER_EGRESS_PROXY_TOKEN:?set a random token}
+      # Obscura below is started with --proxy pointing at this proxy.
+      - VEILRENDER_OBSCURA_REMOTE_PROXIED=true
     volumes:
       - veilrender-data:/data
     depends_on:
@@ -41,7 +49,14 @@ services:
   obscura-worker:
     image: h4ckf0r0day/obscura
     restart: unless-stopped
-    command: ["--stealth", "serve", "--port", "9222"]
+    command:
+      - "--stealth"
+      - "serve"
+      - "--port"
+      - "9222"
+      # Route Obscura's traffic through the gateway's egress proxy.
+      - "--proxy"
+      - "http://veilrender:${VEILRENDER_EGRESS_PROXY_TOKEN:?set a random token}@veilrender:7870"
     deploy:
       replicas: ${OBSCURA_REPLICAS:-3}
       resources:
@@ -60,7 +75,7 @@ services:
 
   camoufox-worker:
     build:
-      context: .
+      context: ..
       dockerfile: deploy/Dockerfile.camoufox
     restart: unless-stopped
     deploy:

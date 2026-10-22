@@ -33,6 +33,47 @@ HTTP request → auth → route handler → browser_manager.get_page()
                                       PlaywrightWorker (Playwright protocol, Firefox/Camoufox)
 ```
 
+### Egress enforcement
+
+Every browser context is pointed at an in-process HTTP proxy
+(`egress_proxy.py`) listening on loopback. The proxy sees each connection the
+browser opens — including redirect hops, which `page.route` does not
+intercept — and:
+
+- resolves the destination once and requires every result to be globally
+  routable (`is_global`),
+- connects to a validated address and never re-resolves, so DNS rebinding
+  cannot move the connection,
+- refuses anything else with `403` before connecting.
+
+Obscura ignores per-context proxy settings, so it is started with `--proxy`.
+If the proxy is unreachable, browser requests fail: there is no unprotected
+path, and tier fallback cannot drop the policy.
+
+An operator-supplied proxy can be chained in front of the public internet with
+`VEILRENDER_UPSTREAM_PROXY`; destinations are still validated locally before
+anything is forwarded, and the validated IP (not the hostname) is sent
+upstream unless `VEILRENDER_UPSTREAM_PIN_IP=false` explicitly opts out.
+
+At startup, after a reconnect, and after a worker restart, each worker runs
+HTTP and CONNECT canary navigations to a `.invalid` host. The proxy refuses
+each token on receipt, before DNS, so a worker that ignores its proxy
+configuration is marked unhealthy rather than used unprotected. The
+destination policy also refuses multicast, NAT64-encoded IPv4
+(`64:ff9b::/96`), 6to4/Teredo, and the other special-purpose ranges that
+`ipaddress.is_global` reports as reachable.
+
+The `/cdp` endpoint is **disabled by default** (`VEILRENDER_CDP_ENABLED=true`
+to opt in): raw CDP clients can create browser contexts outside the proxy.
+Local Chromium is additionally launched with a browser-level `--proxy-server`,
+so targets created over `/cdp` still route through the proxy. When remote
+workers are configured, `/cdp` is rejected because the gateway cannot apply
+that launch-level proxy to them.
+
+Boolean `VEILRENDER_*` variables accept `true/false`, `1/0`, `yes/no`, and
+`on/off`. An empty value means unset (the default); any other value aborts
+startup, so a typo cannot silently disable enforcement.
+
 ### Key components
 
 | Component | File | Purpose |
@@ -43,6 +84,7 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | Routes | `routes/*.py` | `/render`, `/screenshot`, `/health`, `/metrics`, `/stats`, `/` dashboard |
 | Storage | `storage.py` | L1 TTLCache + L2 S3 (vendored `S3Client`) |
 | Filters | `filters.py` | Outbound request blocklist (StevenBlack/hosts) |
+| Egress proxy | `egress_proxy.py` | Enforcing HTTP proxy — validates every connection target, including redirect hops |
 | CDP proxy | `cdp_proxy.py` | WebSocket proxy for direct CDP access |
 | Stats | `stats.py` | In-memory counters, p50/p95 latency |
 
@@ -64,6 +106,20 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | Pool with Obscura | `VEILRENDER_WORKERS=obscura://obs:9223,cdp://chrome:9222` | Remote Obscura (tier 0) + Remote Chrome (tier 1) |
 | Pool mixed | `VEILRENDER_WORKERS=obscura://obs:9223,cdp://chrome:9222,playwright://fox:1234/ws` | Obscura + Chrome + Camoufox |
 
+In pool mode the workers run in separate containers and cannot reach the
+gateway's loopback. Bind the egress proxy to a container-network address,
+advertise it, and require authentication:
+
+```bash
+VEILRENDER_EGRESS_BIND=0.0.0.0
+VEILRENDER_EGRESS_PORT=7870
+VEILRENDER_EGRESS_ADVERTISE=http://<gateway-service>:7870
+VEILRENDER_EGRESS_PROXY_TOKEN=<random-secret>
+```
+
+Remote Obscura workers are not used unless they were started with `--proxy`
+pointing at this proxy and `VEILRENDER_OBSCURA_REMOTE_PROXIED=true` is set.
+
 ### Environment variables
 
 #### Obscura / tier system
@@ -73,6 +129,7 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | `VEILRENDER_OBSCURA` | `false` | Enable local Obscura (tier 0) + CloakBrowser (tier 1) two-tier mode |
 | `VEILRENDER_OBSCURA_MAX_CONCURRENT` | `VEILRENDER_MAX_CONCURRENT` | Max concurrent pages for Obscura (tier 0); independent of tier-1 limit |
 | `VEILRENDER_ENGINE_HEADER` | `false` | Include opaque `X-Render-Engine` header in responses (`alpha` = tier 0, `beta` = tier 1) |
+| `VEILRENDER_OBSCURA_REMOTE_PROXIED` | `false` | Declare that remote Obscura workers were started with `--proxy` pointing at this instance; otherwise they are not used |
 | `OBSCURA_BINARY` | — | Path to Obscura binary (skips auto-download) |
 | `OBSCURA_VERSION` | `0.2.2` | Obscura version to auto-download |
 | `OBSCURA_MIRROR` | — | URL prefix for Obscura download mirror |
@@ -87,6 +144,14 @@ HTTP request → auth → route handler → browser_manager.get_page()
 | `VEILRENDER_TIMEOUT` | `30000` | Default navigation timeout (ms) |
 | `VEILRENDER_WORKERS` | — | Remote worker pool (comma-separated: `cdp://`, `playwright://`, `obscura://`) |
 | `VEILRENDER_RESOURCE_FILTER` | `true` | Enable outbound request blocklist |
+| `VEILRENDER_EGRESS_PROXY` | `true` | Enforce the outbound destination policy through the in-process proxy |
+| `VEILRENDER_EGRESS_BIND` | `127.0.0.1` | Address the egress proxy binds to |
+| `VEILRENDER_EGRESS_PORT` | `0` | Proxy port; `0` = ephemeral. Set a fixed port when remote workers must reach it |
+| `VEILRENDER_EGRESS_ADVERTISE` | — | URL browsers use to reach the proxy (e.g. `http://gateway:7870`); required for workers in other containers |
+| `VEILRENDER_EGRESS_PROXY_TOKEN` | — | Basic-auth password for the proxy; required when the bind address is not loopback |
+| `VEILRENDER_UPSTREAM_PROXY` | — | Chain validated traffic through an `http`, `https`, or `socks5` upstream proxy |
+| `VEILRENDER_UPSTREAM_PIN_IP` | `true` | Send the validated IP (not the hostname) to the upstream proxy; `false` lets the upstream resolve again |
+| `VEILRENDER_CDP_ENABLED` | `false` | Enable the raw `/cdp` WebSocket endpoint. Raw CDP can create contexts that bypass the proxy, so only enable it for trusted operators |
 | `CLOAKBROWSER_BINARY` | — | Path to CloakBrowser binary (skips auto-download) |
 | `CLOAKBROWSER_MIRROR` | — | URL prefix for CloakBrowser download mirror |
 
@@ -100,6 +165,7 @@ src/veilrender/
 ├── browser.py          # Worker classes + BrowserManager pool coordinator
 ├── cdp_proxy.py        # CDP WebSocket proxy
 ├── filters.py          # Outbound request blocklist
+├── egress_proxy.py     # Enforcing egress proxy (destination validation)
 ├── models.py           # Request/response dataclasses
 ├── stats.py            # In-memory request counters and latency
 ├── storage.py          # L1 (TTLCache) + L2 (S3) render cache
@@ -181,6 +247,9 @@ ssh oaklight.buttercup 'cd /dockervol/dockge/stacks/veilrender && \
   non-IP Host headers), verify CDP port is accessible
 - Camoufox worker won't connect → check Playwright version compatibility
   (client/server major.minor must match)
+- Browser navigations fail with proxy or tunnel errors → check the egress
+  proxy log line at startup; for pool mode verify `VEILRENDER_EGRESS_ADVERTISE`,
+  the bind address, and `VEILRENDER_EGRESS_PROXY_TOKEN`
 - Vendor module issue → never fix in-place; update upstream zerodep, re-vendor
 - Test failure after 3 attempts → stop, report full output
 - Never: delete files to fix errors, skip lint, modify `_vendor/` directly

@@ -27,7 +27,7 @@ _OP_CLOSE = 0x8
 _OP_PING = 0x9
 _OP_PONG = 0xA
 
-_WS_MAGIC = b"258EAFA5-E914-47DA-95CA-5B0D11CF9245"
+_WS_MAGIC = b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 # Maximum allowed WebSocket frame payload size (16 MB).
 # Frames exceeding this limit are rejected to prevent OOM from

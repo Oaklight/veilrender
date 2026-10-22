@@ -128,6 +128,17 @@ def main() -> None:
 
                 # Check if this is a WebSocket upgrade to /cdp
                 if is_websocket_upgrade(method, headers, path):
+                    # Raw CDP access can create browser contexts that bypass
+                    # the egress proxy, so it is off unless enabled explicitly.
+                    if not settings.cdp_enabled:
+                        writer.write(
+                            b"HTTP/1.1 404 Not Found\r\n"
+                            b"Content-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        await writer.drain()
+                        writer.close()
+                        return
+
                     worker_idx: int | None = None
                     cdp_min_tier: int = 1
                     for part in query_string.split("&"):
