@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Upstream DNS rebinding closed by default** — with `VEILRENDER_UPSTREAM_PROXY` set, the validated IP is now sent upstream instead of the hostname (`VEILRENDER_UPSTREAM_PIN_IP` defaults to `true`). Setting it to `false` forwards the hostname and is an explicit trade-off.
 - **Strict boolean parsing** — security-relevant `VEILRENDER_*` booleans accept `true/false`, `1/0`, `yes/no`, `on/off`; an empty value means unset, and any other unrecognised value aborts startup instead of silently disabling enforcement.
 - **Control characters rejected** — request targets, CONNECT authorities, and forwarded headers containing C0 controls/DEL are refused, and absolute-form targets are rebuilt from parsed components rather than forwarded verbatim.
-- **Proxy resource limits** — 10s request-header timeout, 5s DNS timeout, 30s drain timeout, 300s tunnel idle timeout, and a 1024-connection cap, so a slow or non-reading peer cannot pin handlers indefinitely.
+- **Proxy resource limits** — 10s request-header timeout, 5s DNS timeout, 30s drain timeout, 60s tunnel idle timeout, and a 1024-connection cap, so a slow or non-reading peer cannot pin handlers indefinitely. DNS lookups run on a small dedicated executor with a capped in-flight count, so a stalled resolver cannot occupy the loop's shared default executor.
+- **Forwarded `Host` rewritten** — absolute-form requests have their `Host` replaced with the validated authority (and duplicate `Host` lines dropped), so the origin cannot be reached under a virtual host the policy did not check.
+- **Canary attestation requires authentication** — when the proxy requires a token, canary requests are only recognised after `Proxy-Authorization` is verified, so an unauthenticated local process cannot forge a worker's attestation.
 - **Corrected 0.6.3 changelog** — the route handler does not see redirect hops; the post-navigation URL validation is what stopped the response body from being returned, while the request itself was still issued.
 
 ### Added
