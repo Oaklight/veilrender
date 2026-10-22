@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-22
+
 ### Security
 
 - **Blind SSRF closed with an enforcing egress proxy** — every browser tier sends its HTTP, HTTPS, and WebSocket traffic through an in-process proxy (`egress_proxy.py`). The proxy validates each destination, including redirect hops that Playwright route handlers cannot see, resolves it once, and connects only to the validated address. Non-global destinations are refused with `403` before any connection is made. This also removes the tier-fallback gap where Obscura's built-in private-network block was lost, and closes DNS rebinding for proxied traffic.
@@ -267,7 +269,9 @@ The egress proxy is enabled by default and changes how every browser reaches the
 - Docker: use `CLOAKBROWSER_CACHE_DIR` so build-time binary download is available at runtime ([#16], [#17])
 - Launch Chromium directly via `subprocess.Popen` + `connect_over_cdp()` instead of Playwright's `launch()`, which overrides `--remote-debugging-port`
 
-[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/Oaklight/veilrender/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/Oaklight/veilrender/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/Oaklight/veilrender/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/Oaklight/veilrender/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/Oaklight/veilrender/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Oaklight/veilrender/compare/v0.5.1...v0.6.0
